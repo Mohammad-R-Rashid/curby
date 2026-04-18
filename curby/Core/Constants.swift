@@ -65,4 +65,27 @@ enum CurbyConstants {
     static let overlayButtonSize: CGFloat = 48.0
     static let overlayCornerRadius: CGFloat = 14.0
     static let overlayPadding: CGFloat = 16.0
+
+    // MARK: - Onboarding
+
+    /// Default walking circumference in miles.
+    static let walkingCircumferenceDefault: Double = 0.25
+    static let walkingCircumferenceMin: Double = 0.1
+    static let walkingCircumferenceMax: Double = 1.0
+    static let walkingCircumferenceStep: Double = 0.05
+
+    // MARK: - Heat Zones
+
+    /// Busy score thresholds.
+    static let busyScoreOpen: Int = 40
+    static let busyScoreBusy: Int = 70
+    /// Above busyScoreBusy is "Very Busy".
+
+    /// Heat zone circle radius on map (metres).
+    static let heatZoneRadiusDefault: Double = 200.0
+
+    // MARK: - Search
+
+    static let maxRecentDestinations: Int = 10
+    static let searchDebounceInterval: TimeInterval = 0.3
 }

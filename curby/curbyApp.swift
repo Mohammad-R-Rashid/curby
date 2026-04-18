@@ -10,9 +10,15 @@ import SwiftUI
 @main
 struct curbyApp: App {
 
+    @AppStorage("curby_has_completed_onboarding") private var hasCompletedOnboarding = false
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            if hasCompletedOnboarding {
+                MainNavigationView()
+            } else {
+                OnboardingView(hasCompletedOnboarding: $hasCompletedOnboarding)
+            }
         }
     }
 }

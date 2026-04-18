@@ -1,1 +1,28 @@
+## Root-level ignore
+.DS_Store
 .netrc
+
+## Xcode
+build/
+DerivedData/
+*.swp
+*.lock
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.pbxuser
+xcuserdata/
+*.xccheckout
+*.moved-aside
+DerivedData
+*.xcuserstate
+
+## Swift Package Manager
+.build/
+.swiftpm/
+
+## AppStoreConnect
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots
+fastlane/test_output

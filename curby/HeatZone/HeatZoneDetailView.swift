@@ -1,0 +1,421 @@
+//
+//  HeatZoneDetailView.swift
+//  curby
+//
+//  In-depth view of a specific heat zone — busy score, street parking, garages.
+//
+
+import CoreLocation
+import SwiftUI
+
+/// Detail view for a single heat zone.
+///
+/// Shows the zone's busy score, street parking openness probabilities,
+/// and nearby garages/lots with capacity.
+struct HeatZoneDetailView: View {
+
+    let zone: HeatZone
+    let destinationName: String
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dismiss) private var dismiss
+
+    private var isDark: Bool { colorScheme == .dark }
+
+    /// Walking circumference filter
+    private var maxWalkingDistance: Double {
+        OnboardingState.storedWalkingCircumference
+    }
+
+    /// Filtered parking spots within walking distance
+    private var filteredSpots: [ParkingSpot] {
+        zone.parkingSpots.filter { $0.walkingDistance <= maxWalkingDistance }
+    }
+
+    private var streetSpots: [ParkingSpot] {
+        filteredSpots.filter { $0.type == .streetCurbside || $0.type == .metered }
+            .sorted { ($0.opennessProbability ?? 0) > ($1.opennessProbability ?? 0) }
+    }
+
+    private var lotSpots: [ParkingSpot] {
+        filteredSpots.filter { $0.type == .garage || $0.type == .lot }
+            .sorted { $0.walkingDistance < $1.walkingDistance }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 24) {
+                // MARK: - Header
+                headerCard
+
+                // MARK: - Street Parking
+                if !streetSpots.isEmpty {
+                    streetParkingSection
+                }
+
+                // MARK: - Garages & Lots
+                if !lotSpots.isEmpty {
+                    garagesSection
+                }
+
+                // MARK: - Destination Info
+                destinationCard
+
+                Spacer(minLength: 40)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+        }
+        .background(
+            (isDark ? Color(red: 0.06, green: 0.06, blue: 0.10) : Color(red: 0.95, green: 0.95, blue: 0.97))
+                .ignoresSafeArea()
+        )
+        .navigationTitle(zone.name)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    // MARK: - Header Card
+
+    private var headerCard: some View {
+        VStack(spacing: 16) {
+            HStack(spacing: 16) {
+                // Busy score circle
+                ZStack {
+                    Circle()
+                        .strokeBorder(busyColor(zone.busyLevel).opacity(0.3), lineWidth: 4)
+                        .frame(width: 72, height: 72)
+
+                    Circle()
+                        .trim(from: 0, to: Double(zone.busyScore) / 100)
+                        .stroke(
+                            busyColor(zone.busyLevel),
+                            style: StrokeStyle(lineWidth: 4, lineCap: .round)
+                        )
+                        .frame(width: 72, height: 72)
+                        .rotationEffect(.degrees(-90))
+
+                    VStack(spacing: 0) {
+                        Text("\(zone.busyScore)")
+                            .font(.system(size: 24, weight: .bold, design: .rounded))
+                            .foregroundStyle(isDark ? .white : .primary)
+
+                        Text("score")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(isDark ? .white.opacity(0.4) : .secondary)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(zone.name)
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundStyle(isDark ? .white : .primary)
+
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(busyColor(zone.busyLevel))
+                            .frame(width: 8, height: 8)
+
+                        Text(zone.busyLevel.displayName)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(busyColor(zone.busyLevel))
+                    }
+
+                    Text("\(filteredSpots.count) parking options within \(String(format: "%.2f", maxWalkingDistance)) mi")
+                        .font(.system(size: 12))
+                        .foregroundStyle(isDark ? .white.opacity(0.4) : .secondary)
+                }
+
+                Spacer()
+            }
+        }
+        .padding(20)
+        .background(cardBackground)
+    }
+
+    // MARK: - Street Parking Section
+
+    private var streetParkingSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader(title: "Street Parking", icon: "road.lanes")
+
+            VStack(spacing: 8) {
+                ForEach(streetSpots) { spot in
+                    streetParkingRow(spot: spot)
+                }
+            }
+        }
+    }
+
+    private func streetParkingRow(spot: ParkingSpot) -> some View {
+        HStack(spacing: 14) {
+            // Openness bar
+            RoundedRectangle(cornerRadius: 3)
+                .fill(busyColor(spot.opennessBusyLevel))
+                .frame(width: 4, height: 44)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(spot.displayName)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(isDark ? .white : .primary)
+
+                    if spot.type == .metered {
+                        Text("Metered")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(isDark ? .white.opacity(0.5) : .secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule()
+                                    .fill(isDark ? .white.opacity(0.1) : .gray.opacity(0.1))
+                            )
+                    }
+                }
+
+                HStack(spacing: 12) {
+                    if let pct = spot.opennessPercentage {
+                        HStack(spacing: 4) {
+                            Text(pct)
+                                .font(.system(size: 13, weight: .bold, design: .rounded))
+                                .foregroundStyle(busyColor(spot.opennessBusyLevel))
+                            Text("open")
+                                .font(.system(size: 12))
+                                .foregroundStyle(isDark ? .white.opacity(0.4) : .secondary)
+                        }
+                    }
+
+                    HStack(spacing: 3) {
+                        Image(systemName: "figure.walk")
+                            .font(.system(size: 10))
+                        Text(String(format: "%.2f mi", spot.walkingDistance))
+                            .font(.system(size: 12))
+                    }
+                    .foregroundStyle(isDark ? .white.opacity(0.4) : .secondary)
+                }
+            }
+
+            Spacer()
+
+            // Openness probability gauge
+            if let prob = spot.opennessProbability {
+                ZStack {
+                    Circle()
+                        .strokeBorder(busyColor(spot.opennessBusyLevel).opacity(0.2), lineWidth: 3)
+                        .frame(width: 40, height: 40)
+
+                    Circle()
+                        .trim(from: 0, to: prob)
+                        .stroke(busyColor(spot.opennessBusyLevel), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                        .frame(width: 40, height: 40)
+                        .rotationEffect(.degrees(-90))
+
+                    Text("\(Int(prob * 100))")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundStyle(isDark ? .white : .primary)
+                }
+            }
+        }
+        .padding(14)
+        .background(cardBackground)
+    }
+
+    // MARK: - Garages Section
+
+    private var garagesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader(title: "Garages & Lots", icon: "building.2")
+
+            VStack(spacing: 8) {
+                ForEach(lotSpots) { spot in
+                    garageLotRow(spot: spot)
+                }
+            }
+        }
+    }
+
+    private func garageLotRow(spot: ParkingSpot) -> some View {
+        HStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(
+                        spot.type == .garage
+                            ? Color(red: 0.30, green: 0.50, blue: 0.85).opacity(0.15)
+                            : Color(red: 0.55, green: 0.75, blue: 0.40).opacity(0.15)
+                    )
+                    .frame(width: 44, height: 44)
+
+                Image(systemName: spot.type.icon)
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(
+                        spot.type == .garage
+                            ? Color(red: 0.30, green: 0.50, blue: 0.85)
+                            : Color(red: 0.55, green: 0.75, blue: 0.40)
+                    )
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(spot.displayName)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(isDark ? .white : .primary)
+
+                HStack(spacing: 12) {
+                    if let capacity = spot.capacityString {
+                        HStack(spacing: 3) {
+                            Image(systemName: "car.fill")
+                                .font(.system(size: 10))
+                            Text(capacity)
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundStyle(
+                            (spot.spotsAvailable ?? 0) > 20
+                                ? Color(red: 0.30, green: 0.78, blue: 0.40)
+                                : Color(red: 1.0, green: 0.55, blue: 0.30)
+                        )
+                    }
+
+                    HStack(spacing: 3) {
+                        Image(systemName: "figure.walk")
+                            .font(.system(size: 10))
+                        Text(String(format: "%.2f mi", spot.walkingDistance))
+                            .font(.system(size: 12))
+                    }
+                    .foregroundStyle(isDark ? .white.opacity(0.4) : .secondary)
+                }
+            }
+
+            Spacer()
+
+            Text(spot.type.displayName)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(isDark ? .white.opacity(0.4) : .secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule()
+                        .fill(isDark ? .white.opacity(0.08) : .gray.opacity(0.08))
+                )
+        }
+        .padding(14)
+        .background(cardBackground)
+    }
+
+    // MARK: - Destination Card
+
+    private var destinationCard: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color.red.opacity(0.15))
+                    .frame(width: 40, height: 40)
+
+                Image(systemName: "flag.checkered")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(.red)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Destination")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(isDark ? .white.opacity(0.4) : .secondary)
+                    .textCase(.uppercase)
+                    .tracking(0.5)
+
+                Text(destinationName)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(isDark ? .white : .primary)
+            }
+
+            Spacer()
+
+            Text("END")
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(.red)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule()
+                        .fill(Color.red.opacity(0.12))
+                )
+        }
+        .padding(16)
+        .background(cardBackground)
+    }
+
+    // MARK: - Helpers
+
+    private var cardBackground: some View {
+        RoundedRectangle(cornerRadius: 14)
+            .fill(isDark ? .white.opacity(0.05) : .white)
+            .shadow(color: .black.opacity(isDark ? 0 : 0.05), radius: 6, y: 2)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(isDark ? .white.opacity(0.06) : .clear, lineWidth: 0.5)
+            )
+    }
+
+    private func sectionHeader(title: String, icon: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(isDark ? .white.opacity(0.4) : .secondary)
+
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(isDark ? .white.opacity(0.4) : .secondary)
+                .textCase(.uppercase)
+                .tracking(1.0)
+        }
+    }
+
+    private func busyColor(_ level: BusyLevel) -> Color {
+        switch level {
+        case .open: return Color(red: 0.30, green: 0.78, blue: 0.40)
+        case .busy: return Color(red: 1.0, green: 0.70, blue: 0.20)
+        case .veryBusy: return Color(red: 1.0, green: 0.35, blue: 0.30)
+        }
+    }
+}
+
+// MARK: - Preview
+
+#Preview {
+    NavigationStack {
+        HeatZoneDetailView(
+            zone: HeatZone(
+                id: UUID(),
+                name: "West Campus — Core",
+                coordinate: .init(latitude: 30.2849, longitude: -97.7514),
+                radius: 200,
+                busyScore: 76,
+                parkingSpots: [
+                    ParkingSpot(
+                        id: UUID(),
+                        coordinate: .init(latitude: 30.285, longitude: -97.751),
+                        type: .streetCurbside,
+                        walkingDistance: 0.12,
+                        roadName: "Guadalupe St",
+                        opennessProbability: 0.72,
+                        segmentLength: 300,
+                        lotName: nil,
+                        spotsAvailable: nil,
+                        totalSpots: nil
+                    ),
+                    ParkingSpot(
+                        id: UUID(),
+                        coordinate: .init(latitude: 30.284, longitude: -97.752),
+                        type: .garage,
+                        walkingDistance: 0.18,
+                        roadName: nil,
+                        opennessProbability: nil,
+                        segmentLength: nil,
+                        lotName: "Capitol Parking Garage",
+                        spotsAvailable: 45,
+                        totalSpots: 200
+                    )
+                ],
+                boundaryCoords: []
+            ),
+            destinationName: "West Campus"
+        )
+    }
+}

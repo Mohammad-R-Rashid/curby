@@ -1,0 +1,186 @@
+//
+//  HeatZoneManager.swift
+//  curby
+//
+//  Provides heat zone data — mock for now, real API later.
+//
+
+import CoreLocation
+import Foundation
+import Observation
+
+/// Manages heat zone data for a given destination.
+///
+/// Currently generates realistic mock data with block-shaped zones.
+/// The interface is designed so a real API can be swapped in without changing consumers.
+@Observable
+final class HeatZoneManager {
+
+    // MARK: - State
+
+    /// Heat zones around the current destination.
+    private(set) var heatZones: [HeatZone] = []
+
+    /// Whether we're loading zone data.
+    private(set) var isLoading: Bool = false
+
+    /// The currently selected heat zone (for detail view).
+    var selectedZone: HeatZone?
+
+    // MARK: - Public
+
+    /// Load heat zones around a destination coordinate.
+    func loadZones(around coordinate: CLLocationCoordinate2D, destinationName: String) {
+        isLoading = true
+
+        // Simulate network delay
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(800))
+            heatZones = Self.generateMockZones(around: coordinate, name: destinationName)
+            isLoading = false
+        }
+    }
+
+    /// Clear all zones (when destination changes).
+    func clearZones() {
+        heatZones = []
+        selectedZone = nil
+    }
+
+    // MARK: - Mock Data Generation
+
+    /// Generates mock heat zones with block-shaped boundaries around a coordinate.
+    private static func generateMockZones(
+        around center: CLLocationCoordinate2D,
+        name: String
+    ) -> [HeatZone] {
+        // (name, lat offset, lng offset, busy score, template index, rotation, size)
+        let zoneData: [(String, Double, Double, Int, Int, Double, Double)] = [
+            ("\(name) — Core",    0.0,     0.0,     82, 0, 5.0,  180),
+            ("North Block",       0.004,   0.001,   65, 1, -3.0, 160),
+            ("South Side",       -0.004,  -0.0005,  45, 2, 8.0,  200),
+            ("East Quarter",      0.001,   0.005,   73, 3, -5.0, 150),
+            ("West End",         -0.001,  -0.005,   38, 4, 12.0, 170),
+            ("Riverside",        -0.006,   0.003,   55, 5, 0.0,  190),
+        ]
+
+        return zoneData.map { data in
+            let zoneCenter = CLLocationCoordinate2D(
+                latitude: center.latitude + data.1,
+                longitude: center.longitude + data.2
+            )
+
+            let boundary = HeatZoneGeometry.blockBoundary(
+                center: zoneCenter,
+                sizeMeters: data.6,
+                templateIndex: data.4,
+                rotation: data.5
+            )
+
+            let spots = generateMockParkingSpots(
+                around: zoneCenter,
+                busyScore: data.3,
+                zoneSizeMeters: data.6
+            )
+
+            return HeatZone(
+                id: UUID(),
+                name: data.0,
+                coordinate: zoneCenter,
+                radius: data.6,
+                busyScore: data.3,
+                parkingSpots: spots,
+                boundaryCoords: boundary
+            )
+        }
+    }
+
+    /// Generates mock parking spots positioned within a zone's block area.
+    private static func generateMockParkingSpots(
+        around center: CLLocationCoordinate2D,
+        busyScore: Int,
+        zoneSizeMeters: Double
+    ) -> [ParkingSpot] {
+        let baseOpenness = max(0.05, 1.0 - Double(busyScore) / 100.0)
+        let spread = zoneSizeMeters / 111_320.0 * 0.6 // Stay within zone
+
+        let streetNames = [
+            "Guadalupe St", "Lavaca St", "Congress Ave",
+            "Rio Grande St", "San Antonio St", "Nueces St",
+            "Red River St", "Brazos St"
+        ]
+        let garageNames = [
+            "Capitol Parking Garage", "City Hall Garage",
+            "Convention Center Lot", "Brazos Street Garage",
+            "University Garage", "Market District Lot"
+        ]
+
+        var spots: [ParkingSpot] = []
+
+        // Street parking spots (3-4 per zone)
+        for i in 0..<Int.random(in: 3...4) {
+            let jitter = Double.random(in: -0.15...0.15)
+            let openness = min(1.0, max(0.05, baseOpenness + jitter))
+            let latOff = Double.random(in: -spread...spread)
+            let lngOff = Double.random(in: -spread...spread)
+
+            spots.append(ParkingSpot(
+                id: UUID(),
+                coordinate: CLLocationCoordinate2D(
+                    latitude: center.latitude + latOff,
+                    longitude: center.longitude + lngOff
+                ),
+                type: .streetCurbside,
+                walkingDistance: Double.random(in: 0.05...0.4),
+                roadName: streetNames[i % streetNames.count],
+                opennessProbability: openness,
+                segmentLength: Double.random(in: 100...400),
+                lotName: nil,
+                spotsAvailable: nil,
+                totalSpots: nil
+            ))
+        }
+
+        // Metered spot
+        spots.append(ParkingSpot(
+            id: UUID(),
+            coordinate: CLLocationCoordinate2D(
+                latitude: center.latitude + Double.random(in: -spread...spread),
+                longitude: center.longitude + Double.random(in: -spread...spread)
+            ),
+            type: .metered,
+            walkingDistance: Double.random(in: 0.1...0.3),
+            roadName: streetNames[Int.random(in: 3...5)],
+            opennessProbability: min(1.0, max(0.05, baseOpenness + Double.random(in: -0.1...0.1))),
+            segmentLength: Double.random(in: 50...200),
+            lotName: nil,
+            spotsAvailable: nil,
+            totalSpots: nil
+        ))
+
+        // Garages / lots (1-2 per zone)
+        for i in 0..<Int.random(in: 1...2) {
+            let totalCapacity = Int.random(in: 80...400)
+            let occupancyRate = Double(busyScore) / 100.0
+            let available = max(0, Int(Double(totalCapacity) * (1.0 - occupancyRate + Double.random(in: -0.1...0.1))))
+
+            spots.append(ParkingSpot(
+                id: UUID(),
+                coordinate: CLLocationCoordinate2D(
+                    latitude: center.latitude + Double.random(in: -spread...spread),
+                    longitude: center.longitude + Double.random(in: -spread...spread)
+                ),
+                type: i == 0 ? .garage : .lot,
+                walkingDistance: Double.random(in: 0.1...0.5),
+                roadName: nil,
+                opennessProbability: nil,
+                segmentLength: nil,
+                lotName: garageNames[i % garageNames.count],
+                spotsAvailable: available,
+                totalSpots: totalCapacity
+            ))
+        }
+
+        return spots
+    }
+}

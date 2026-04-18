@@ -131,4 +131,19 @@ final class CameraController {
             )
         }
     }
+
+    /// Navigate the map to show a specific destination coordinate.
+    func navigateToDestination(_ coordinate: CLLocationCoordinate2D, zoom: Double = CurbyConstants.zoomDefault) {
+        mode = .freeExplore
+
+        withViewportAnimation(.default(maxDuration: CurbyConstants.cameraTransitionDuration)) {
+            viewport = .camera(
+                center: coordinate,
+                zoom: zoom,
+                bearing: 0,
+                pitch: CurbyConstants.pitchTilted
+            )
+        }
+    }
 }
+

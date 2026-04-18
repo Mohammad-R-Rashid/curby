@@ -29,6 +29,8 @@
 	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Curby uses your location to show your position on the map and provide nearby parking information.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Curby uses your calendar to suggest destinations from upcoming events and help you find parking ahead of time.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
