@@ -9,6 +9,7 @@ import SwiftUI
 
 @main
 struct curbyApp: App {
+
     var body: some Scene {
         WindowGroup {
             ContentView()
