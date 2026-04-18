@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import CoreLocation
 
 /// Overlay controls rendered above the map surface.
 ///
