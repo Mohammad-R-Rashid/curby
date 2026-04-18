@@ -1,0 +1,16 @@
+{
+  "name": "curby-telemetry-consumer",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-18",
+  "compatibility_flags": ["nodejs_compat"],
+  "queues": {
+    "consumers": [{
+      "queue": "curby-telemetry",
+      "max_batch_size": 100,
+      "max_batch_timeout": 5
+    }]
+  },
+  "r2_buckets": [
+    { "binding": "TELEMETRY_LAKE", "bucket_name": "curby-telemetry-lake" }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "name": "curby-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Curby crowdsourced parking load balancer — backend monorepo",
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "deploy:all": "pnpm -r run deploy",
+    "typecheck": "pnpm -r run typecheck",
+    "build": "pnpm -r run build"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

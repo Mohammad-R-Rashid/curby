@@ -1,0 +1,30 @@
+{
+  "name": "curby-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-18",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "durable_objects": {
+    "bindings": [
+      { "name": "REGION_COORDINATOR", "class_name": "RegionCoordinatorDO" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_classes": ["RegionCoordinatorDO"] }
+  ],
+
+  "queues": {
+    "producers": [
+      { "binding": "TELEMETRY_QUEUE", "queue": "curby-telemetry" },
+      { "binding": "SESSION_QUEUE", "queue": "curby-sessions" }
+    ]
+  },
+
+  "r2_buckets": [
+    { "binding": "TELEMETRY_LAKE", "bucket_name": "curby-telemetry-lake" }
+  ],
+
+  "kv_namespaces": [
+    { "binding": "CURBY_CONFIG", "id": "REPLACE_WITH_YOUR_KV_NAMESPACE_ID" }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "curby-session-consumer",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-18",
+  "compatibility_flags": ["nodejs_compat"],
+  "queues": {
+    "consumers": [{
+      "queue": "curby-sessions",
+      "max_batch_size": 50,
+      "max_batch_timeout": 3
+    }]
+  }
+}
