@@ -91,6 +91,7 @@ struct CurbyMapView: View {
             Puck2D(bearing: .heading)
         }
         .mapStyle(colorScheme == .dark ? .dark : .standard)
+        .ornamentOptions(OrnamentOptions(compass: CompassViewOptions(visibility: .hidden)))
     }
 
     // MARK: - Setup

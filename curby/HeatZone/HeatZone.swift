@@ -45,6 +45,85 @@ enum BusyLevel: String, CaseIterable, Codable {
     }
 }
 
+// MARK: - Parking Surface Geometry
+
+/// Describes how a parking zone resolves visually as the user zooms in.
+///
+/// These geometries are intentionally backend-ready: later we can replace the mock coordinates
+/// with exact GeoJSON polygons for curb segments, garages, lots, and building footprints.
+enum ParkingSurfaceKind: String, CaseIterable, Codable {
+    case overviewArea
+    case curbSegment
+    case garageFootprint
+    case lotFootprint
+
+    var minimumZoom: Double {
+        switch self {
+        case .overviewArea:
+            return 0
+        case .curbSegment:
+            return CurbyConstants.parkingStreetDetailZoom
+        case .garageFootprint, .lotFootprint:
+            return CurbyConstants.parkingStructureDetailZoom
+        }
+    }
+
+    var isStructureLevel: Bool {
+        switch self {
+        case .garageFootprint, .lotFootprint:
+            return true
+        case .overviewArea, .curbSegment:
+            return false
+        }
+    }
+}
+
+/// A single backend-ready polygon that can be rendered on the map.
+struct ParkingSurface: Identifiable, Hashable {
+    let id: UUID
+    let zoneID: UUID
+    let name: String
+    let kind: ParkingSurfaceKind
+    let busyLevel: BusyLevel
+    let polygonCoords: [CLLocationCoordinate2D]
+    let minimumZoom: Double
+    let sourceReference: String?
+
+    init(
+        id: UUID = UUID(),
+        zoneID: UUID,
+        name: String,
+        kind: ParkingSurfaceKind,
+        busyLevel: BusyLevel,
+        polygonCoords: [CLLocationCoordinate2D],
+        minimumZoom: Double? = nil,
+        sourceReference: String? = nil
+    ) {
+        self.id = id
+        self.zoneID = zoneID
+        self.name = name
+        self.kind = kind
+        self.busyLevel = busyLevel
+        self.polygonCoords = polygonCoords
+        self.minimumZoom = minimumZoom ?? kind.minimumZoom
+        self.sourceReference = sourceReference
+    }
+
+    func isVisible(at zoom: Double) -> Bool {
+        zoom >= minimumZoom
+    }
+
+    // Hash by stable identity so backend-fed geometry arrays do not need
+    // CLLocationCoordinate2D to conform to Hashable.
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+
+    static func == (lhs: ParkingSurface, rhs: ParkingSurface) -> Bool {
+        lhs.id == rhs.id
+    }
+}
+
 // MARK: - Heat Zone
 
 /// A geographic zone with aggregated parking busyness data.
@@ -55,13 +134,63 @@ struct HeatZone: Identifiable, Hashable {
     let radius: Double // metres
     let busyScore: Int // 0–100
     let parkingSpots: [ParkingSpot]
+    let parkingSurfaces: [ParkingSurface]
 
-    /// Pre-computed polygon boundary following block/road outlines.
-    /// Used for rendering on the map. Empty = no polygon rendered.
-    let boundaryCoords: [CLLocationCoordinate2D]
+    /// Pre-computed polygon boundary for the overview stage.
+    /// Kept as a convenience alias for legacy consumers.
+    var boundaryCoords: [CLLocationCoordinate2D] {
+        overviewSurface?.polygonCoords ?? []
+    }
 
     var busyLevel: BusyLevel {
         BusyLevel(score: busyScore)
+    }
+
+    var overviewSurface: ParkingSurface? {
+        parkingSurfaces.first(where: { $0.kind == .overviewArea })
+    }
+
+    var streetLevelSurfaces: [ParkingSurface] {
+        parkingSurfaces.filter { $0.kind == .curbSegment }
+    }
+
+    var structureLevelSurfaces: [ParkingSurface] {
+        parkingSurfaces.filter(\.kind.isStructureLevel)
+    }
+
+    func visibleSurfaces(at zoom: Double) -> [ParkingSurface] {
+        parkingSurfaces.filter { $0.isVisible(at: zoom) }
+    }
+
+    init(
+        id: UUID,
+        name: String,
+        coordinate: CLLocationCoordinate2D,
+        radius: Double,
+        busyScore: Int,
+        parkingSpots: [ParkingSpot],
+        boundaryCoords: [CLLocationCoordinate2D],
+        parkingSurfaces: [ParkingSurface] = []
+    ) {
+        self.id = id
+        self.name = name
+        self.coordinate = coordinate
+        self.radius = radius
+        self.busyScore = busyScore
+        self.parkingSpots = parkingSpots
+
+        if parkingSurfaces.isEmpty {
+            let overview = ParkingSurface(
+                zoneID: id,
+                name: name,
+                kind: .overviewArea,
+                busyLevel: BusyLevel(score: busyScore),
+                polygonCoords: boundaryCoords
+            )
+            self.parkingSurfaces = boundaryCoords.isEmpty ? [] : [overview]
+        } else {
+            self.parkingSurfaces = parkingSurfaces
+        }
     }
 
     // Hashable conformance using id only
@@ -162,5 +291,19 @@ struct ParkingSpot: Identifiable, Hashable {
     var capacityString: String? {
         guard let available = spotsAvailable, let total = totalSpots else { return nil }
         return "\(available)/\(total)"
+    }
+
+    /// Busy level inferred from the remaining capacity.
+    var capacityBusyLevel: BusyLevel {
+        guard
+            let available = spotsAvailable,
+            let total = totalSpots,
+            total > 0
+        else {
+            return .busy
+        }
+
+        let occupancy = 1.0 - (Double(available) / Double(total))
+        return BusyLevel(score: Int(occupancy * 100))
     }
 }

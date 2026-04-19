@@ -103,6 +103,79 @@ enum HeatZoneGeometry {
         return Polygon([coords])
     }
 
+    /// Creates a rotated rectangular footprint.
+    ///
+    /// This is used for street-level curb segments and structure-level garage/lot footprints.
+    static func rectangleBoundary(
+        center: CLLocationCoordinate2D,
+        lengthMeters: Double,
+        widthMeters: Double,
+        rotation: Double = 0
+    ) -> [CLLocationCoordinate2D] {
+        let halfLength = lengthMeters / 2.0
+        let halfWidth = widthMeters / 2.0
+
+        let corners: [(Double, Double)] = [
+            (-halfLength, -halfWidth),
+            (halfLength, -halfWidth),
+            (halfLength, halfWidth),
+            (-halfLength, halfWidth)
+        ]
+
+        let radians = rotation * .pi / 180.0
+        let cosR = cos(radians)
+        let sinR = sin(radians)
+
+        var coords = corners.map { east, north in
+            let rotatedEast = east * cosR - north * sinR
+            let rotatedNorth = east * sinR + north * cosR
+            return offsetCoordinate(
+                from: center,
+                northMeters: rotatedNorth,
+                eastMeters: rotatedEast
+            )
+        }
+
+        if let first = coords.first {
+            coords.append(first)
+        }
+
+        return coords
+    }
+
+    /// Offsets a coordinate by local north/east metre values.
+    static func offsetCoordinate(
+        from coordinate: CLLocationCoordinate2D,
+        northMeters: Double,
+        eastMeters: Double
+    ) -> CLLocationCoordinate2D {
+        let latitudeOffset = northMeters / 111_320.0
+        let longitudeOffset = eastMeters / (111_320.0 * cos(coordinate.latitude * .pi / 180.0))
+
+        return CLLocationCoordinate2D(
+            latitude: coordinate.latitude + latitudeOffset,
+            longitude: coordinate.longitude + longitudeOffset
+        )
+    }
+
+    /// Converts parking surfaces into a GeoJSON feature collection for style-layer rendering.
+    static func featureCollection(for surfaces: [ParkingSurface]) -> FeatureCollection {
+        FeatureCollection(features: surfaces.map(feature(for:)))
+    }
+
+    static func feature(for surface: ParkingSurface) -> Feature {
+        var feature = Feature(geometry: .polygon(polygon(from: surface.polygonCoords)))
+        feature.identifier = .string(surface.id.uuidString)
+        feature.properties = [
+            "zone_id": .string(surface.zoneID.uuidString),
+            "surface_id": .string(surface.id.uuidString),
+            "kind": .string(surface.kind.rawValue),
+            "busy_level": .string(surface.busyLevel.rawValue),
+            "name": .string(surface.name)
+        ]
+        return feature
+    }
+
     // MARK: - Legacy Circle (kept for fallback)
 
     /// Creates a geographic circle polygon from a center coordinate and radius.
@@ -143,6 +216,10 @@ enum HeatZoneGeometry {
         case .veryBusy:
             return UIColor(red: 1.0, green: 0.35, blue: 0.30, alpha: 1.0)
         }
+    }
+
+    static func styleColor(for level: BusyLevel) -> StyleColor {
+        StyleColor(uiColor(for: level))
     }
 
     /// SwiftUI Color for a busy level.

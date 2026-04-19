@@ -65,6 +65,7 @@ final class HeatZoneManager {
         ]
 
         return zoneData.map { data in
+            let zoneID = UUID()
             let zoneCenter = CLLocationCoordinate2D(
                 latitude: center.latitude + data.1,
                 longitude: center.longitude + data.2
@@ -83,14 +84,25 @@ final class HeatZoneManager {
                 zoneSizeMeters: data.6
             )
 
+            let surfaces = generateMockParkingSurfaces(
+                zoneID: zoneID,
+                zoneName: data.0,
+                zoneBusyScore: data.3,
+                zoneRotation: data.5,
+                zoneSizeMeters: data.6,
+                overviewBoundary: boundary,
+                parkingSpots: spots
+            )
+
             return HeatZone(
-                id: UUID(),
+                id: zoneID,
                 name: data.0,
                 coordinate: zoneCenter,
                 radius: data.6,
                 busyScore: data.3,
                 parkingSpots: spots,
-                boundaryCoords: boundary
+                boundaryCoords: boundary,
+                parkingSurfaces: surfaces
             )
         }
     }
@@ -182,5 +194,90 @@ final class HeatZoneManager {
         }
 
         return spots
+    }
+
+    private static func generateMockParkingSurfaces(
+        zoneID: UUID,
+        zoneName: String,
+        zoneBusyScore: Int,
+        zoneRotation: Double,
+        zoneSizeMeters: Double,
+        overviewBoundary: [CLLocationCoordinate2D],
+        parkingSpots: [ParkingSpot]
+    ) -> [ParkingSurface] {
+        var surfaces: [ParkingSurface] = [
+            ParkingSurface(
+                zoneID: zoneID,
+                name: zoneName,
+                kind: .overviewArea,
+                busyLevel: BusyLevel(score: zoneBusyScore),
+                polygonCoords: overviewBoundary
+            )
+        ]
+
+        var streetSurfaceIndex = 0
+
+        for spot in parkingSpots {
+            switch spot.type {
+            case .streetCurbside, .metered:
+                let segmentLengthFeet = spot.segmentLength ?? 180
+                let segmentLengthMeters = max(28, min(segmentLengthFeet * 0.3048, zoneSizeMeters * 0.7))
+                let corridorWidth = spot.type == .metered ? 8.0 : 11.0
+                let alignment = streetSurfaceIndex.isMultiple(of: 2) ? zoneRotation : zoneRotation + 90
+                streetSurfaceIndex += 1
+
+                surfaces.append(
+                    ParkingSurface(
+                        zoneID: zoneID,
+                        name: spot.displayName,
+                        kind: .curbSegment,
+                        busyLevel: spot.opennessBusyLevel,
+                        polygonCoords: HeatZoneGeometry.rectangleBoundary(
+                            center: spot.coordinate,
+                            lengthMeters: segmentLengthMeters,
+                            widthMeters: corridorWidth,
+                            rotation: alignment
+                        ),
+                        sourceReference: spot.id.uuidString
+                    )
+                )
+
+            case .garage:
+                surfaces.append(
+                    ParkingSurface(
+                        zoneID: zoneID,
+                        name: spot.displayName,
+                        kind: .garageFootprint,
+                        busyLevel: spot.capacityBusyLevel,
+                        polygonCoords: HeatZoneGeometry.rectangleBoundary(
+                            center: spot.coordinate,
+                            lengthMeters: max(30, zoneSizeMeters * 0.26),
+                            widthMeters: max(22, zoneSizeMeters * 0.18),
+                            rotation: zoneRotation
+                        ),
+                        sourceReference: spot.id.uuidString
+                    )
+                )
+
+            case .lot:
+                surfaces.append(
+                    ParkingSurface(
+                        zoneID: zoneID,
+                        name: spot.displayName,
+                        kind: .lotFootprint,
+                        busyLevel: spot.capacityBusyLevel,
+                        polygonCoords: HeatZoneGeometry.rectangleBoundary(
+                            center: spot.coordinate,
+                            lengthMeters: max(28, zoneSizeMeters * 0.24),
+                            widthMeters: max(18, zoneSizeMeters * 0.16),
+                            rotation: zoneRotation + 12
+                        ),
+                        sourceReference: spot.id.uuidString
+                    )
+                )
+            }
+        }
+
+        return surfaces
     }
 }

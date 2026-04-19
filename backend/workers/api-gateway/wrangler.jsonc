@@ -10,7 +10,7 @@
     ]
   },
   "migrations": [
-    { "tag": "v1", "new_classes": ["RegionCoordinatorDO"] }
+    { "tag": "v1", "new_sqlite_classes": ["RegionCoordinatorDO"] }
   ],
 
   "queues": {
@@ -25,6 +25,6 @@
   ],
 
   "kv_namespaces": [
-    { "binding": "CURBY_CONFIG", "id": "REPLACE_WITH_YOUR_KV_NAMESPACE_ID" }
+    { "binding": "CURBY_CONFIG", "id": "c6be65765cee46f482e1e0acf00a40b3" }
   ]
 }

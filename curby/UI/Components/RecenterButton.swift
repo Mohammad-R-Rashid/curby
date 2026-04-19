@@ -22,39 +22,21 @@ struct RecenterButton: View {
             triggerHaptic()
             action()
         } label: {
-            ZStack {
-                Circle()
-                    .fill(.ultraThinMaterial)
-                    .shadow(color: .black.opacity(0.15), radius: 8, x: 0, y: 4)
-
-                Circle()
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(0.3),
-                                Color.white.opacity(0.05)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 0.5
-                    )
-
-                Image(systemName: "location.fill")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [Color.accentColor, Color.accentColor.opacity(0.7)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-            }
-            .frame(
-                width: CurbyConstants.overlayButtonSize,
-                height: CurbyConstants.overlayButtonSize
-            )
-            .scaleEffect(isPressed ? 0.9 : 1.0)
+            Image(systemName: "location.fill")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(CurbyGlass.primaryTint)
+                .glassEffect(.regular.interactive(), in: .circle)
+                .overlay {
+                    Circle()
+                        .strokeBorder(CurbyGlass.outline, lineWidth: 0.75)
+                }
+                .shadow(color: .black.opacity(0.12), radius: 8, x: 0, y: 4)
+                .shadow(color: CurbyGlass.primaryTint.opacity(0.14), radius: 12, x: 0, y: 6)
+                .scaleEffect(isPressed ? 0.92 : 1.0)
+                .frame(
+                    width: CurbyConstants.overlayButtonSize,
+                    height: CurbyConstants.overlayButtonSize
+                )
         }
         .buttonStyle(.plain)
         .simultaneousGesture(

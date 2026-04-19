@@ -1,0 +1,294 @@
+//
+//  ParkingZoneMapStyleContent.swift
+//  curby
+//
+//  Zoom-aware style-layer rendering for parking zone geometry.
+//
+
+import MapboxMaps
+import SwiftUI
+
+enum ParkingZoneLayerIDs {
+    static let overviewHitLayer = "parking-overview-hit-layer"
+    static let streetHitLayer = "parking-street-hit-layer"
+    static let garageHitLayer = "parking-garage-hit-layer"
+    static let lotHitLayer = "parking-lot-hit-layer"
+}
+
+/// Renders parking zones using GeoJSON sources and style layers so backend GeoJSON
+/// can later be swapped in without changing the view hierarchy.
+struct ParkingZoneMapStyleContent: MapStyleContent {
+    let zones: [HeatZone]
+    let selectedZoneID: UUID?
+    let zoom: Double
+
+    var body: some MapStyleContent {
+        let visibleSurfaces = zones.flatMap { $0.visibleSurfaces(at: zoom) }
+
+        let overviewSurfaces = visibleSurfaces.filter { $0.kind == .overviewArea }
+        let streetSurfaces = visibleSurfaces.filter { $0.kind == .curbSegment }
+        let garageSurfaces = visibleSurfaces.filter { $0.kind == .garageFootprint }
+        let lotSurfaces = visibleSurfaces.filter { $0.kind == .lotFootprint }
+
+        if !overviewSurfaces.isEmpty {
+            surfaceGroup(
+                idPrefix: "parking-overview",
+                surfaces: overviewSurfaces,
+                style: .overview,
+                interactionLayerID: ParkingZoneLayerIDs.overviewHitLayer
+            )
+        }
+
+        if !streetSurfaces.isEmpty {
+            surfaceGroup(
+                idPrefix: "parking-street",
+                surfaces: streetSurfaces,
+                style: .street,
+                interactionLayerID: ParkingZoneLayerIDs.streetHitLayer
+            )
+        }
+
+        if !garageSurfaces.isEmpty {
+            surfaceGroup(
+                idPrefix: "parking-garage",
+                surfaces: garageSurfaces,
+                style: .garage,
+                interactionLayerID: ParkingZoneLayerIDs.garageHitLayer
+            )
+        }
+
+        if !lotSurfaces.isEmpty {
+            surfaceGroup(
+                idPrefix: "parking-lot",
+                surfaces: lotSurfaces,
+                style: .lot,
+                interactionLayerID: ParkingZoneLayerIDs.lotHitLayer
+            )
+        }
+    }
+
+    @MapStyleContentBuilder
+    private func surfaceGroup(
+        idPrefix: String,
+        surfaces: [ParkingSurface],
+        style: ParkingSurfaceVisualStyle,
+        interactionLayerID: String
+    ) -> some MapStyleContent {
+        let sourceID = "\(idPrefix)-source"
+        let selectedSourceID = "\(idPrefix)-selected-source"
+        let selectedSurfaces = surfaces.filter { $0.zoneID == selectedZoneID }
+        let openSurfaces = surfaces.filter { $0.busyLevel == .open }
+        let busySurfaces = surfaces.filter { $0.busyLevel == .busy }
+        let veryBusySurfaces = surfaces.filter { $0.busyLevel == .veryBusy }
+
+        GeoJSONSource(id: sourceID)
+            .data(.featureCollection(HeatZoneGeometry.featureCollection(for: surfaces)))
+
+        fillSourceAndLayer(
+            sourceID: "\(idPrefix)-open-source",
+            layerID: "\(idPrefix)-fill-open",
+            surfaces: openSurfaces,
+            color: HeatZoneGeometry.styleColor(for: .open),
+            style: style
+        )
+
+        fillSourceAndLayer(
+            sourceID: "\(idPrefix)-busy-source",
+            layerID: "\(idPrefix)-fill-busy",
+            surfaces: busySurfaces,
+            color: HeatZoneGeometry.styleColor(for: .busy),
+            style: style
+        )
+
+        fillSourceAndLayer(
+            sourceID: "\(idPrefix)-veryBusy-source",
+            layerID: "\(idPrefix)-fill-veryBusy",
+            surfaces: veryBusySurfaces,
+            color: HeatZoneGeometry.styleColor(for: .veryBusy),
+            style: style
+        )
+
+        strokeLayer(
+            id: "\(idPrefix)-stroke",
+            sourceID: sourceID,
+            style: style
+        )
+
+        // A nearly transparent fill layer makes the rendered polygons consistently tappable.
+        interactionLayer(
+            id: interactionLayerID,
+            sourceID: sourceID,
+            style: style
+        )
+
+        if !selectedSurfaces.isEmpty {
+            GeoJSONSource(id: selectedSourceID)
+                .data(.featureCollection(HeatZoneGeometry.featureCollection(for: selectedSurfaces)))
+
+            selectedFillLayer(
+                id: "\(idPrefix)-selected-fill",
+                sourceID: selectedSourceID,
+                style: style
+            )
+
+            selectedStrokeLayer(
+                id: "\(idPrefix)-selected-stroke",
+                sourceID: selectedSourceID,
+                style: style
+            )
+        }
+    }
+
+    @MapStyleContentBuilder
+    private func fillSourceAndLayer(
+        sourceID: String,
+        layerID: String,
+        surfaces: [ParkingSurface],
+        color: StyleColor,
+        style: ParkingSurfaceVisualStyle
+    ) -> some MapStyleContent {
+        if !surfaces.isEmpty {
+            GeoJSONSource(id: sourceID)
+                .data(.featureCollection(HeatZoneGeometry.featureCollection(for: surfaces)))
+
+            fillLayer(
+                id: layerID,
+                sourceID: sourceID,
+                color: color,
+                style: style
+            )
+        }
+    }
+
+    private func fillLayer(
+        id: String,
+        sourceID: String,
+        color: StyleColor,
+        style: ParkingSurfaceVisualStyle
+    ) -> FillLayer {
+        var layer: FillLayer = FillLayer(id: id, source: sourceID)
+        layer = layer.fillColor(color)
+        layer = layer.fillOpacity(style.fillOpacity)
+
+        if let slot = style.slot {
+            layer = layer.slot(slot)
+        }
+
+        return layer
+    }
+
+    private func strokeLayer(
+        id: String,
+        sourceID: String,
+        style: ParkingSurfaceVisualStyle
+    ) -> LineLayer {
+        var layer = LineLayer(id: id, source: sourceID)
+            .lineColor(StyleColor(.white))
+            .lineOpacity(style.strokeOpacity)
+            .lineWidth(style.strokeWidth)
+            .lineJoin(.round)
+            .lineCap(.round)
+
+        if let slot = style.slot {
+            layer = layer.slot(slot)
+        }
+
+        return layer
+    }
+
+    private func interactionLayer(
+        id: String,
+        sourceID: String,
+        style: ParkingSurfaceVisualStyle
+    ) -> FillLayer {
+        var layer = FillLayer(id: id, source: sourceID)
+            .fillColor(StyleColor(.white))
+            .fillOpacity(0.01)
+
+        if let slot = style.slot {
+            layer = layer.slot(slot)
+        }
+
+        return layer
+    }
+
+    private func selectedFillLayer(
+        id: String,
+        sourceID: String,
+        style: ParkingSurfaceVisualStyle
+    ) -> FillLayer {
+        var layer = FillLayer(id: id, source: sourceID)
+            .fillColor(StyleColor(.white))
+            .fillOpacity(style.selectedFillOpacity)
+
+        if let slot = style.slot {
+            layer = layer.slot(slot)
+        }
+
+        return layer
+    }
+
+    private func selectedStrokeLayer(
+        id: String,
+        sourceID: String,
+        style: ParkingSurfaceVisualStyle
+    ) -> LineLayer {
+        var layer = LineLayer(id: id, source: sourceID)
+            .lineColor(StyleColor(.white))
+            .lineOpacity(1.0)
+            .lineWidth(style.selectedStrokeWidth)
+            .lineJoin(.round)
+            .lineCap(.round)
+
+        if let slot = style.slot {
+            layer = layer.slot(slot)
+        }
+
+        return layer
+    }
+}
+
+private struct ParkingSurfaceVisualStyle {
+    let slot: Slot?
+    let fillOpacity: Double
+    let strokeOpacity: Double
+    let strokeWidth: Double
+    let selectedFillOpacity: Double
+    let selectedStrokeWidth: Double
+
+    static let overview = ParkingSurfaceVisualStyle(
+        slot: .bottom,
+        fillOpacity: 0.18,
+        strokeOpacity: 0.28,
+        strokeWidth: 1.2,
+        selectedFillOpacity: 0.26,
+        selectedStrokeWidth: 1.8
+    )
+
+    static let street = ParkingSurfaceVisualStyle(
+        slot: .middle,
+        fillOpacity: 0.32,
+        strokeOpacity: 0.62,
+        strokeWidth: 1.4,
+        selectedFillOpacity: 0.44,
+        selectedStrokeWidth: 2.2
+    )
+
+    static let garage = ParkingSurfaceVisualStyle(
+        slot: .middle,
+        fillOpacity: 0.42,
+        strokeOpacity: 0.82,
+        strokeWidth: 1.9,
+        selectedFillOpacity: 0.54,
+        selectedStrokeWidth: 2.6
+    )
+
+    static let lot = ParkingSurfaceVisualStyle(
+        slot: .middle,
+        fillOpacity: 0.28,
+        strokeOpacity: 0.72,
+        strokeWidth: 1.6,
+        selectedFillOpacity: 0.40,
+        selectedStrokeWidth: 2.3
+    )
+}

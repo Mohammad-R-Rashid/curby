@@ -70,8 +70,8 @@ chmod +x scripts/deploy.sh
 |------|--------|:-:|
 | 1 | `pnpm install` | No |
 | 2 | Creates KV namespace, 2 Queues, R2 bucket | No |
-| 3 | Pushes secrets to `api-gateway` via `wrangler secret:bulk` | No |
-| 4 | Pushes secrets to `session-consumer` via `wrangler secret:bulk` | No |
+| 3 | Pushes secrets to `api-gateway` via `wrangler secret bulk` | No |
+| 4 | Pushes secrets to `session-consumer` via `wrangler secret bulk` | No |
 | 5 | Seeds default remote config into KV | No |
 | 6 | Deploys all 3 workers (`wrangler deploy`) | No |
 | 7 | Health check on the deployed API | No |
@@ -124,7 +124,7 @@ echo "new-value" | wrangler secret put MAPBOX_ACCESS_TOKEN --config workers/api-
 # Or update .env and re-push all secrets at once
 source .env
 cd workers/api-gateway
-echo "{\"SUPABASE_URL\":\"$SUPABASE_URL\",\"SUPABASE_SECRET_KEY\":\"$SUPABASE_SECRET_KEY\",\"MAPBOX_ACCESS_TOKEN\":\"$MAPBOX_ACCESS_TOKEN\"}" | wrangler secret:bulk
+echo "{\"SUPABASE_URL\":\"$SUPABASE_URL\",\"SUPABASE_SECRET_KEY\":\"$SUPABASE_SECRET_KEY\",\"MAPBOX_ACCESS_TOKEN\":\"$MAPBOX_ACCESS_TOKEN\"}" | wrangler secret bulk
 ```
 
 ---
@@ -133,15 +133,18 @@ echo "{\"SUPABASE_URL\":\"$SUPABASE_URL\",\"SUPABASE_SECRET_KEY\":\"$SUPABASE_SE
 
 Change algorithm weights, detection thresholds, etc. without redeploying:
 
+Wrangler 4 does not support `--pipe` on `kv key put`; pass a file with `--path` instead.
+
 ```bash
-# Edit the config
-node -e "
-  const c = $(node scripts/seed-config.js);
-  c.version = 2;
-  c.algorithm.weights.availability = 0.35;
-  console.log(JSON.stringify(c));
-" | wrangler kv:key put --namespace-id=<YOUR_KV_ID> "app_config" --pipe
+cd backend
+CONFIG_TMP=$(mktemp)
+node scripts/seed-config.js >"$CONFIG_TMP"
+wrangler kv key put app_config --path="$CONFIG_TMP" --namespace-id=<YOUR_KV_ID> --remote
+rm -f "$CONFIG_TMP"
 ```
+
+To upload a hand-edited JSON file:  
+`wrangler kv key put app_config --path=./my-config.json --namespace-id=<YOUR_KV_ID> --remote`.
 
 Or go to **Cloudflare Dashboard → KV → curby-config → edit `app_config`** and paste updated JSON.
 
@@ -168,5 +171,5 @@ This runs `wrangler deploy` in all 3 worker directories. Secrets and KV are not 
 | `pnpm: command not found` | `npm install -g pnpm` |
 | Queue/R2 create fails | Your Cloudflare plan may need Workers Paid ($5/mo) |
 | Secrets not taking effect | Redeploy the affected worker: `cd workers/api-gateway && wrangler deploy` |
-| KV ID not detected by script | Find it in Cloudflare Dashboard → KV, or run `wrangler kv:namespace list` |
+| KV ID not detected by script | Find it in Cloudflare Dashboard → KV, or run `wrangler kv namespace list` |
 | Supabase connection errors | Verify `SUPABASE_URL` doesn't have a trailing slash |

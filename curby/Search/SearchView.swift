@@ -17,14 +17,14 @@ struct SearchView: View {
 
     @Bindable var searchState: SearchState
     let heatZoneManager: HeatZoneManager
+    /// Shown when the map is in free-explore mode (user panned away from follow).
+    var showRecenterButton: Bool = false
+    var onRecenter: (() -> Void)?
     let onDestinationSelected: (SelectedDestination) -> Void
     let onZoneSelected: (HeatZone) -> Void
     let onClearDestination: () -> Void
 
     @FocusState private var isSearchFocused: Bool
-    @Environment(\.colorScheme) private var colorScheme
-
-    private var isDark: Bool { colorScheme == .dark }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -44,8 +44,7 @@ struct SearchView: View {
                     if searchState.isSearchActive && !searchState.searchText.isEmpty {
                         searchResultsSection
                     } else if let dest = searchState.selectedDestination {
-                        // DESTINATION MODE — show navigate + zones
-                        destinationHeader(dest)
+                        // DESTINATION MODE — destination summary lives in the search bar
                         navigateButton(dest)
 
                         if heatZoneManager.isLoading {
@@ -72,92 +71,93 @@ struct SearchView: View {
     // MARK: - Search Bar (Liquid Glass)
 
     private var searchBar: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(.secondary)
+        GlassEffectContainer(spacing: CurbyGlass.chromeSpacing) {
+            HStack(spacing: 12) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(CurbyGlass.primaryTint)
 
-            if let dest = searchState.selectedDestination, !searchState.isSearchActive {
-                // Destination mode — show name
-                HStack {
-                    Text(dest.name)
+                if let dest = searchState.selectedDestination, !searchState.isSearchActive {
+                    // Destination mode — name + subtitle in the bar (no duplicate header card)
+                    HStack(alignment: .center, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(dest.name)
+                                .font(.system(size: 17, weight: .medium))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+
+                            if !dest.subtitle.isEmpty {
+                                Text(dest.subtitle)
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+
+                        Spacer(minLength: 8)
+
+                        if showRecenterButton {
+                            barAccessoryButton(
+                                symbol: "location.fill",
+                                tint: CurbyGlass.primaryTint,
+                                accessibilityLabel: "Recenter map on your location"
+                            ) {
+                                onRecenter?()
+                            }
+                        }
+
+                        barAccessoryButton(
+                            symbol: "xmark",
+                            tint: .secondary,
+                            accessibilityLabel: "Clear destination"
+                        ) {
+                            searchState.clearDestination()
+                            onClearDestination()
+                        }
+                    }
+                } else {
+                    // Search mode — text field
+                    TextField("Where to?", text: $searchState.searchText)
                         .font(.system(size: 17))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
+                        .focused($isSearchFocused)
+                        .onChange(of: searchState.searchText) { _, _ in
+                            searchState.isSearchActive = true
+                            searchState.onSearchTextChanged()
+                        }
 
-                    Spacer()
-
-                    Button {
-                        searchState.clearDestination()
-                        onClearDestination()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 16))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-            } else {
-                // Search mode — text field
-                TextField("Where to?", text: $searchState.searchText)
-                    .font(.system(size: 17))
-                    .focused($isSearchFocused)
-                    .onChange(of: searchState.searchText) { _, _ in
-                        searchState.isSearchActive = true
-                        searchState.onSearchTextChanged()
+                    if !searchState.searchText.isEmpty {
+                        barAccessoryButton(
+                            symbol: "xmark",
+                            tint: .secondary,
+                            accessibilityLabel: "Clear search"
+                        ) {
+                            searchState.searchText = ""
+                            searchState.isSearchActive = false
+                            isSearchFocused = false
+                        }
                     }
 
-                if !searchState.searchText.isEmpty {
-                    Button {
-                        searchState.searchText = ""
-                        searchState.isSearchActive = false
-                        isSearchFocused = false
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 16))
-                            .foregroundStyle(.tertiary)
+                    if showRecenterButton {
+                        barAccessoryButton(
+                            symbol: "location.fill",
+                            tint: CurbyGlass.primaryTint,
+                            accessibilityLabel: "Recenter map on your location"
+                        ) {
+                            onRecenter?()
+                        }
                     }
-                }
 
-                if searchState.isSearching {
-                    ProgressView()
-                        .scaleEffect(0.8)
+                    if searchState.isSearching {
+                        ProgressView()
+                            .tint(CurbyGlass.primaryTint)
+                            .scaleEffect(0.8)
+                    }
                 }
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .curbyGlassSurface(cornerRadius: CurbyGlass.barCornerRadius)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12))
-    }
-
-    // MARK: - Destination Header
-
-    private func destinationHeader(_ dest: SelectedDestination) -> some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(Color.red.opacity(0.15))
-                    .frame(width: 40, height: 40)
-
-                Image(systemName: "mappin.circle.fill")
-                    .font(.system(size: 20))
-                    .foregroundStyle(.red)
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(dest.name)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.primary)
-
-                Text(dest.subtitle)
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-
-            Spacer()
-        }
-        .padding(14)
-        .padding(.horizontal, 16)
     }
 
     // MARK: - Navigate Button (Liquid Glass)
@@ -173,11 +173,12 @@ struct SearchView: View {
                 Text("Navigate")
                     .font(.system(size: 17, weight: .semibold))
             }
-            .foregroundStyle(Color(red: 0.30, green: 0.70, blue: 1.0))
+            .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
-            .frame(height: 50)
+            .frame(height: 52)
         }
-        .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 14))
+        .buttonStyle(.glassProminent)
+        .tint(CurbyGlass.primaryTint)
         .padding(.horizontal, 16)
     }
 
@@ -200,12 +201,12 @@ struct SearchView: View {
                     HStack(spacing: 12) {
                         ZStack {
                             Circle()
-                                .fill(Color(red: 0.30, green: 0.70, blue: 1.0).opacity(0.15))
+                                .fill(CurbyGlass.primaryTint.opacity(0.16))
                                 .frame(width: 36, height: 36)
 
                             Image(systemName: "mappin")
                                 .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(Color(red: 0.30, green: 0.70, blue: 1.0))
+                                .foregroundStyle(CurbyGlass.primaryTint)
                         }
 
                         VStack(alignment: .leading, spacing: 2) {
@@ -231,6 +232,9 @@ struct SearchView: View {
             }
         }
         .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .curbyGlassSurface(cornerRadius: 18)
+        .padding(.horizontal, 16)
     }
 
     // MARK: - Heat Zones Section
@@ -238,6 +242,7 @@ struct SearchView: View {
     private var loadingIndicator: some View {
         HStack(spacing: 8) {
             ProgressView()
+                .tint(CurbyGlass.primaryTint)
                 .scaleEffect(0.7)
             Text("Finding parking zones…")
                 .font(.system(size: 13))
@@ -245,6 +250,8 @@ struct SearchView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 20)
+        .curbyGlassSurface(cornerRadius: 18)
+        .padding(.horizontal, 16)
     }
 
     private var heatZonesSection: some View {
@@ -310,7 +317,10 @@ struct SearchView: View {
                 .foregroundStyle(.tertiary)
         }
         .padding(14)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12))
+        .curbyGlassSurface(
+            tint: HeatZoneGeometry.color(for: zone.busyLevel),
+            cornerRadius: CurbyGlass.compactCornerRadius
+        )
     }
 
     // MARK: - Places Section (Liquid Glass circles)
@@ -347,7 +357,14 @@ struct SearchView: View {
                 .font(.system(size: 22, weight: .medium))
                 .foregroundStyle(HeatZoneGeometry.color(for: location.busyLevel))
                 .frame(width: 56, height: 56)
-                .glassEffect(.regular.interactive(), in: .circle)
+                .glassEffect(
+                    .regular.tint(HeatZoneGeometry.color(for: location.busyLevel).opacity(0.18)),
+                    in: .circle
+                )
+                .overlay {
+                    Circle()
+                        .strokeBorder(CurbyGlass.outline, lineWidth: 0.75)
+                }
 
             Text(location.name)
                 .font(.system(size: 11, weight: .medium))
@@ -413,13 +430,37 @@ struct SearchView: View {
                     }
                 }
             }
+            .padding(.vertical, 6)
+            .curbyGlassSurface(cornerRadius: 18)
+            .padding(.horizontal, 16)
         }
     }
 
     // MARK: - Helpers
 
+    private func barAccessoryButton(
+        symbol: String,
+        tint: Color,
+        accessibilityLabel: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 32, height: 32)
+                .contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
     private func sectionHeader(title: String, icon: String) -> some View {
         HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(CurbyGlass.primaryTint)
+
             Text(title)
                 .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(.primary)
@@ -449,6 +490,8 @@ struct SearchView: View {
     SearchView(
         searchState: SearchState(),
         heatZoneManager: HeatZoneManager(),
+        showRecenterButton: true,
+        onRecenter: {},
         onDestinationSelected: { _ in },
         onZoneSelected: { _ in },
         onClearDestination: { }

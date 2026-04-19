@@ -29,6 +29,8 @@ struct MainNavigationView: View {
     @State private var sheetDetent: PresentationDetent = .fraction(0.30)
     @State private var selectedZone: HeatZone?
     @State private var hasSetInitialViewport = false
+    @State private var currentMapZoom = CurbyConstants.zoomDefault
+    @State private var selectedBuilding: StandardBuildingsFeature?
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -70,13 +72,16 @@ struct MainNavigationView: View {
         .sheet(isPresented: .constant(true)) {
             sheetContent
                 .presentationDetents(
-                    [.fraction(0.25), .medium, .large],
+                    [.fraction(0.25), .fraction(0.30), .medium, .large],
                     selection: $sheetDetent
                 )
                 .presentationDragIndicator(.visible)
                 .presentationBackgroundInteraction(.enabled(upThrough: .medium))
                 .presentationCornerRadius(24)
                 .interactiveDismissDisabled()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(.systemBackground))
+                .ignoresSafeArea(edges: .bottom)
         }
         .onAppear {
             locationService.requestPermission()
@@ -102,60 +107,108 @@ struct MainNavigationView: View {
 
     @ViewBuilder
     private var mapView: some View {
-        Map(viewport: $cameraController.viewport) {
-            // User location puck
-            Puck2D(bearing: .heading)
+        MapReader { proxy in
+            Map(viewport: $cameraController.viewport) {
+                // User location puck
+                Puck2D(bearing: .heading)
 
-            // Heat zone block-shaped polygons
-            if !heatZoneManager.heatZones.isEmpty {
-                PolygonAnnotationGroup(heatZoneManager.heatZones) { zone in
-                    PolygonAnnotation(
-                        polygon: HeatZoneGeometry.polygon(from: zone.boundaryCoords)
+                if !heatZoneManager.heatZones.isEmpty {
+                    ParkingZoneMapStyleContent(
+                        zones: heatZoneManager.heatZones,
+                        selectedZoneID: selectedZone?.id,
+                        zoom: currentMapZoom
                     )
-                    .fillColor(StyleColor(
-                        HeatZoneGeometry.uiColor(for: zone.busyLevel)
-                    ))
-                    .fillOpacity(
-                        zone.id == selectedZone?.id
-                            ? (colorScheme == .dark ? 0.50 : 0.35)
-                            : (colorScheme == .dark ? 0.35 : 0.20)
-                    )
-                    .fillOutlineColor(StyleColor(
-                        HeatZoneGeometry.uiColor(for: zone.busyLevel)
-                    ))
+
+                    if currentMapZoom < CurbyConstants.parkingBadgeCutoffZoom {
+                        // Zone badges remain at overview zooms, then yield to street/building geometry.
+                        ForEvery(heatZoneManager.heatZones) { zone in
+                            MapViewAnnotation(coordinate: zone.coordinate) {
+                                HeatZoneBadge(zone: zone)
+                                    .onTapGesture {
+                                        selectZone(zone)
+                                    }
+                            }
+                            .allowOverlap(true)
+                        }
+                    }
                 }
 
-                // Heat zone badges (B / VB labels)
-                ForEvery(heatZoneManager.heatZones) { zone in
-                    MapViewAnnotation(coordinate: zone.coordinate) {
-                        HeatZoneBadge(zone: zone)
-                            .onTapGesture {
-                                selectZone(zone)
-                            }
+                if currentMapZoom >= CurbyConstants.parkingStructureDetailZoom,
+                   let selectedBuilding
+                {
+                    FeatureState(selectedBuilding, .init(select: true))
+                }
+
+                if currentMapZoom >= CurbyConstants.parkingStructureDetailZoom {
+                    TapInteraction(.standardBuildings) { building, _ in
+                        selectedBuilding = building
+                        return true
+                    }
+                }
+
+                TapInteraction(.layer(ParkingZoneLayerIDs.overviewHitLayer), radius: 8) { feature, _ in
+                    selectZoneForSurfaceFeature(feature)
+                    return true
+                }
+
+                TapInteraction(.layer(ParkingZoneLayerIDs.streetHitLayer), radius: 8) { feature, _ in
+                    selectZoneForSurfaceFeature(feature)
+                    return true
+                }
+
+                TapInteraction(.layer(ParkingZoneLayerIDs.garageHitLayer), radius: 8) { feature, _ in
+                    selectZoneForSurfaceFeature(feature)
+                    return false
+                }
+
+                TapInteraction(.layer(ParkingZoneLayerIDs.lotHitLayer), radius: 8) { feature, _ in
+                    selectZoneForSurfaceFeature(feature)
+                    return false
+                }
+
+                TapInteraction { _ in
+                    if currentMapZoom >= CurbyConstants.parkingStructureDetailZoom {
+                        selectedBuilding = nil
+                    }
+                    return false
+                }
+
+                // Parking spot markers (shown when a zone is selected)
+                if let zone = selectedZone {
+                    ForEvery(zone.parkingSpots) { spot in
+                        MapViewAnnotation(coordinate: spot.coordinate) {
+                            ParkingSpotMarker(spot: spot)
+                        }
+                        .allowOverlap(false)
+                    }
+                }
+
+                // Destination pin
+                if let dest = searchState.selectedDestination {
+                    MapViewAnnotation(coordinate: dest.coordinate) {
+                        DestinationPin()
                     }
                     .allowOverlap(true)
                 }
             }
+            .mapStyle(.standard(lightPreset: colorScheme == .dark ? .dusk : .day))
+            .onStyleLoaded { _ in
+                try? proxy.map?.setStyleImportConfigProperty(
+                    for: "basemap",
+                    config: "showIndoor",
+                    value: true
+                )
+            }
+            .onCameraChanged { event in
+                currentMapZoom = event.cameraState.zoom
 
-            // Parking spot markers (shown when a zone is selected)
-            if let zone = selectedZone {
-                ForEvery(zone.parkingSpots) { spot in
-                    MapViewAnnotation(coordinate: spot.coordinate) {
-                        ParkingSpotMarker(spot: spot)
-                    }
-                    .allowOverlap(false)
+                if event.cameraState.zoom < CurbyConstants.parkingStructureDetailZoom {
+                    selectedBuilding = nil
                 }
             }
-
-            // Destination pin
-            if let dest = searchState.selectedDestination {
-                MapViewAnnotation(coordinate: dest.coordinate) {
-                    DestinationPin()
-                }
-                .allowOverlap(true)
-            }
+            // Hide SDK compass — we use the custom compass in `overlayControls`.
+            .ornamentOptions(OrnamentOptions(compass: CompassViewOptions(visibility: .hidden)))
         }
-        .mapStyle(.standard(lightPreset: colorScheme == .dark ? .dusk : .day))
     }
 
     // MARK: - Zone Selection
@@ -165,7 +218,20 @@ struct MainNavigationView: View {
             selectedZone = zone
             sheetDetent = .medium
         }
+        selectedBuilding = nil
         cameraController.navigateToDestination(zone.coordinate, zoom: 17.0)
+    }
+
+    private func selectZoneForSurfaceFeature(_ feature: FeaturesetFeature) {
+        guard
+            let zoneIDString = feature.properties["zone_id"]??.string,
+            let zoneID = UUID(uuidString: zoneIDString),
+            let zone = heatZoneManager.heatZones.first(where: { $0.id == zoneID })
+        else {
+            return
+        }
+
+        selectZone(zone)
     }
 
     // MARK: - Overlay Controls (Liquid Glass)
@@ -180,19 +246,8 @@ struct MainNavigationView: View {
             .padding(.top, 8)
 
             Spacer()
-
-            HStack(alignment: .bottom) {
-                gpsStatusIndicator
-
-                Spacer()
-
-                if cameraController.showRecenterButton {
-                    recenterButton
-                }
-            }
-            .padding(.horizontal, CurbyConstants.overlayPadding)
-            .padding(.bottom, 280)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Compass (Liquid Glass)
@@ -213,55 +268,22 @@ struct MainNavigationView: View {
         .rotationEffect(.degrees(-heading))
         .frame(width: 36, height: 36)
         .glassEffect(.regular, in: .circle)
+        .overlay {
+            Circle()
+                .strokeBorder(CurbyGlass.outline, lineWidth: 0.75)
+        }
         .opacity(heading < 15 || heading > 345 ? 0.3 : 1.0)
     }
 
-    // MARK: - GPS Status (Liquid Glass)
+    // MARK: - Recenter (sheet — moves with bottom panel)
 
-    private var gpsStatusIndicator: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(gpsColor)
-                .frame(width: 8, height: 8)
-
-            Text(gpsText)
-                .font(.system(size: 11, weight: .medium, design: .rounded))
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .glassEffect(.regular, in: .capsule)
-    }
-
-    // MARK: - Recenter (Liquid Glass)
-
-    private var recenterButton: some View {
-        Button {
+    private var sheetRecenterButton: some View {
+        sheetBarIconButton(
+            symbol: "location.fill",
+            tint: CurbyGlass.primaryTint,
+            accessibilityLabel: "Recenter map on your location"
+        ) {
             cameraController.recenter()
-        } label: {
-            Image(systemName: "location.fill")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(Color(red: 0.30, green: 0.70, blue: 1.0))
-                .frame(width: 44, height: 44)
-        }
-        .glassEffect(.regular.interactive(), in: .circle)
-    }
-
-    private var gpsColor: Color {
-        if !locationService.hasInitialFix { return .orange }
-        switch locationService.horizontalAccuracy {
-        case ..<10: return .green
-        case 10..<30: return .yellow
-        default: return .orange
-        }
-    }
-
-    private var gpsText: String {
-        if !locationService.hasInitialFix { return "Locating…" }
-        switch locationService.horizontalAccuracy {
-        case ..<10: return "GPS Strong"
-        case 10..<30: return "GPS Fair"
-        default: return "GPS Weak"
         }
     }
 
@@ -273,43 +295,51 @@ struct MainNavigationView: View {
             // ZONE DETAIL MODE
             VStack(spacing: 0) {
                 // Back bar
-                HStack {
-                    Button {
-                        withAnimation {
-                            selectedZone = nil
-                            if let dest = searchState.selectedDestination {
-                                cameraController.navigateToDestination(dest.coordinate)
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 14, weight: .semibold))
-                            Text("Zones")
-                                .font(.system(size: 15, weight: .medium))
-                        }
-                        .foregroundStyle(Color(red: 0.30, green: 0.70, blue: 1.0))
-                    }
-
-                    Spacer()
-
-                    // Navigate button in detail
-                    if let dest = searchState.selectedDestination {
+                GlassEffectContainer(spacing: CurbyGlass.chromeSpacing) {
+                    HStack {
                         Button {
-                            openInMaps(coordinate: dest.coordinate, name: dest.name)
+                            withAnimation {
+                                selectedZone = nil
+                                if let dest = searchState.selectedDestination {
+                                    cameraController.navigateToDestination(dest.coordinate)
+                                }
+                            }
                         } label: {
                             HStack(spacing: 4) {
-                                Image(systemName: "arrow.triangle.turn.up.right.diamond.fill")
-                                    .font(.system(size: 12))
-                                Text("Navigate")
-                                    .font(.system(size: 13, weight: .semibold))
+                                Image(systemName: "chevron.left")
+                                    .font(.system(size: 14, weight: .semibold))
+                                Text("Zones")
+                                    .font(.system(size: 15, weight: .medium))
                             }
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
+                            .foregroundStyle(CurbyGlass.primaryTint)
                         }
-                        .glassEffect(.regular.interactive(), in: .capsule)
+
+                        Spacer()
+
+                        if cameraController.showRecenterButton {
+                            sheetRecenterButton
+                        }
+
+                        // Navigate button in detail
+                        if let dest = searchState.selectedDestination {
+                            Button {
+                                openInMaps(coordinate: dest.coordinate, name: dest.name)
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "arrow.triangle.turn.up.right.diamond.fill")
+                                        .font(.system(size: 12))
+                                    Text("Navigate")
+                                        .font(.system(size: 13, weight: .semibold))
+                                }
+                                .frame(minWidth: 96)
+                            }
+                            .buttonStyle(.glassProminent)
+                            .tint(CurbyGlass.primaryTint)
+                        }
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .curbyGlassSurface(cornerRadius: CurbyGlass.barCornerRadius)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 12)
@@ -325,6 +355,8 @@ struct MainNavigationView: View {
             SearchView(
                 searchState: searchState,
                 heatZoneManager: heatZoneManager,
+                showRecenterButton: cameraController.showRecenterButton,
+                onRecenter: { cameraController.recenter() },
                 onDestinationSelected: { dest in
                     heatZoneManager.loadZones(
                         around: dest.coordinate,
@@ -389,6 +421,23 @@ struct MainNavigationView: View {
         default:
             break
         }
+    }
+
+    private func sheetBarIconButton(
+        symbol: String,
+        tint: Color,
+        accessibilityLabel: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 32, height: 32)
+                .contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
     }
 }
 

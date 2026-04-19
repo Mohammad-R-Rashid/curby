@@ -7,6 +7,13 @@
 CREATE EXTENSION IF NOT EXISTS "postgis";
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- PostGIS creates public.spatial_ref_sys which is extension-owned by
+-- supabase_admin. We CANNOT enable RLS on it (42501: must be owner).
+-- The REVOKE blocks anon/authenticated access, which is the real fix.
+-- The Security Advisor warning is a known false positive for extension tables.
+-- https://github.com/supabase/supabase/issues/29122
+REVOKE ALL PRIVILEGES ON TABLE public.spatial_ref_sys FROM anon, authenticated;
+
 -- ============================================================
 -- Table: active_parks — The Live Occupancy Map
 -- ============================================================
@@ -281,30 +288,30 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Handle a depart event: delete from active_parks + log to parking_events
+-- Implemented with DELETE…RETURNING in a CTE (no geometry/text DECLARE vars) so
+-- Supabase’s SQL linter does not mistake PL/pgSQL variables for new tables.
 CREATE OR REPLACE FUNCTION handle_depart(
   p_user_id uuid,
   p_recorded_at timestamptz
 )
 RETURNS void AS $$
 DECLARE
-  v_location geometry;
-  v_geohash  text;
+  n int;
 BEGIN
-  -- Fetch existing park
-  SELECT location, geohash INTO v_location, v_geohash
-  FROM active_parks
-  WHERE user_id = p_user_id;
+  WITH d AS (
+    DELETE FROM active_parks
+    WHERE user_id = p_user_id
+    RETURNING location, geohash
+  )
+  INSERT INTO parking_events (user_id, event_type, location, geohash, recorded_at)
+  SELECT p_user_id, 'departed', location, geohash, p_recorded_at
+  FROM d;
 
-  IF v_location IS NULL THEN
+  GET DIAGNOSTICS n = ROW_COUNT;
+
+  IF n = 0 THEN
     RAISE EXCEPTION 'No active park not found for user %', p_user_id;
   END IF;
-
-  -- Delete from active_parks
-  DELETE FROM active_parks WHERE user_id = p_user_id;
-
-  -- Log departure event
-  INSERT INTO parking_events (user_id, event_type, location, geohash, recorded_at)
-  VALUES (p_user_id, 'departed', v_location, v_geohash, p_recorded_at);
 END;
 $$ LANGUAGE plpgsql;
 
@@ -345,22 +352,28 @@ $$ LANGUAGE plpgsql;
 -- ============================================================
 -- Row-Level Security
 -- ============================================================
+-- DROP POLICY IF EXISTS keeps this file safe to re-run after partial applies.
 
 ALTER TABLE active_parks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE parking_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE routing_sessions ENABLE ROW LEVEL SECURITY;
 
 -- active_parks: public read, secret key write
+DROP POLICY IF EXISTS "active_parks_read" ON active_parks;
+DROP POLICY IF EXISTS "active_parks_write" ON active_parks;
 CREATE POLICY "active_parks_read" ON active_parks
   FOR SELECT USING (true);
 CREATE POLICY "active_parks_write" ON active_parks
   FOR ALL USING (true) WITH CHECK (true);
 
 -- parking_events: secret key only (no public access)
+DROP POLICY IF EXISTS "parking_events_service" ON parking_events;
 CREATE POLICY "parking_events_service" ON parking_events
   FOR ALL USING (true) WITH CHECK (true);
 
 -- routing_sessions: public read filtered by user_id, secret key write
+DROP POLICY IF EXISTS "routing_sessions_read" ON routing_sessions;
+DROP POLICY IF EXISTS "routing_sessions_write" ON routing_sessions;
 CREATE POLICY "routing_sessions_read" ON routing_sessions
   FOR SELECT USING (true);
 CREATE POLICY "routing_sessions_write" ON routing_sessions

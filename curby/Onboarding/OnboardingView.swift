@@ -24,9 +24,9 @@ struct OnboardingView: View {
             // Background gradient
             LinearGradient(
                 colors: [
-                    Color(red: 0.06, green: 0.06, blue: 0.12),
-                    Color(red: 0.10, green: 0.08, blue: 0.18),
-                    Color(red: 0.05, green: 0.05, blue: 0.10)
+                    Color(red: 0.04, green: 0.08, blue: 0.14),
+                    Color(red: 0.08, green: 0.14, blue: 0.24),
+                    Color(red: 0.03, green: 0.06, blue: 0.12)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
@@ -80,8 +80,12 @@ struct OnboardingView: View {
                 .font(.system(size: 32, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 80, height: 80)
-                .glassEffect(.regular, in: .circle)
-                .shadow(color: Color(red: 0.25, green: 0.55, blue: 1.0).opacity(0.4), radius: 20, y: 8)
+                .glassEffect(.regular.tint(CurbyGlass.primaryTint.opacity(0.18)), in: .circle)
+                .overlay {
+                    Circle()
+                        .strokeBorder(CurbyGlass.outline, lineWidth: 0.75)
+                }
+                .shadow(color: CurbyGlass.primaryTint.opacity(0.35), radius: 20, y: 8)
 
             Text("Welcome to Curby")
                 .font(.system(size: 34, weight: .bold, design: .rounded))
@@ -89,7 +93,7 @@ struct OnboardingView: View {
 
             Text("Find parking before you arrive")
                 .font(.system(size: 17, weight: .regular))
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(.white.opacity(0.72))
         }
         .padding(.bottom, 8)
     }
@@ -100,7 +104,7 @@ struct OnboardingView: View {
         VStack(spacing: 16) {
             Text("Get Started")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(.white.opacity(0.48))
                 .textCase(.uppercase)
                 .tracking(1.2)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -108,7 +112,7 @@ struct OnboardingView: View {
             // Location permission
             permissionCard(
                 icon: "location.fill",
-                iconColor: Color(red: 0.30, green: 0.70, blue: 1.0),
+                iconColor: CurbyGlass.primaryTint,
                 title: "Location Access",
                 description: "See your position and find parking near you",
                 isGranted: state.locationGranted,
@@ -120,7 +124,7 @@ struct OnboardingView: View {
             // Calendar permission
             permissionCard(
                 icon: "calendar",
-                iconColor: Color(red: 1.0, green: 0.55, blue: 0.35),
+                iconColor: CurbyGlass.warningTint,
                 title: "Calendar Access",
                 description: "Smart suggestions from your upcoming events",
                 isGranted: state.calendarGranted,
@@ -142,14 +146,12 @@ struct OnboardingView: View {
     ) -> some View {
         HStack(spacing: 16) {
             ZStack {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(iconColor.opacity(0.15))
-                    .frame(width: 48, height: 48)
-
                 Image(systemName: icon)
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(iconColor)
+                    .frame(width: 48, height: 48)
             }
+            .curbyGlassSurface(tint: iconColor, cornerRadius: 14)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
@@ -160,19 +162,19 @@ struct OnboardingView: View {
                     if isRequired {
                         Text("Required")
                             .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.5))
+                            .foregroundStyle(.white.opacity(0.7))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(
                                 Capsule()
-                                    .fill(.white.opacity(0.1))
+                                    .fill(.white.opacity(0.14))
                             )
                     }
                 }
 
                 Text(description)
                     .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.white.opacity(0.64))
             }
 
             Spacer()
@@ -186,15 +188,14 @@ struct OnboardingView: View {
                 Button(action: action) {
                     Text("Allow")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
+                        .frame(minWidth: 72)
                 }
-                .glassEffect(.regular.interactive(), in: .capsule)
+                .buttonStyle(.glass)
+                .tint(iconColor)
             }
         }
         .padding(16)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16))
+        .curbyGlassSurface(tint: iconColor, cornerRadius: CurbyGlass.cardCornerRadius)
         .animation(.spring(response: 0.3), value: isGranted)
     }
 
@@ -204,7 +205,7 @@ struct OnboardingView: View {
         VStack(spacing: 16) {
             Text("Walking Distance")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(.white.opacity(0.48))
                 .textCase(.uppercase)
                 .tracking(1.2)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -213,7 +214,7 @@ struct OnboardingView: View {
                 HStack {
                     Image(systemName: "figure.walk")
                         .font(.system(size: 20))
-                        .foregroundStyle(Color(red: 0.55, green: 0.85, blue: 0.50))
+                        .foregroundStyle(CurbyGlass.successTint)
 
                     Text("How far will you walk?")
                         .font(.system(size: 16, weight: .semibold))
@@ -223,7 +224,7 @@ struct OnboardingView: View {
 
                     Text(String(format: "%.2f mi", state.walkingCircumference))
                         .font(.system(size: 20, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color(red: 0.55, green: 0.85, blue: 0.50))
+                        .foregroundStyle(CurbyGlass.successTint)
                         .contentTransition(.numericText())
                 }
 
@@ -234,28 +235,31 @@ struct OnboardingView: View {
                         in: CurbyConstants.walkingCircumferenceMin...CurbyConstants.walkingCircumferenceMax,
                         step: CurbyConstants.walkingCircumferenceStep
                     )
-                    .tint(Color(red: 0.55, green: 0.85, blue: 0.50))
+                    .tint(CurbyGlass.successTint)
 
                     HStack {
                         Text("\(String(format: "%.1f", CurbyConstants.walkingCircumferenceMin)) mi")
                             .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.3))
+                            .foregroundStyle(.white.opacity(0.42))
 
                         Spacer()
 
                         Text("\(String(format: "%.1f", CurbyConstants.walkingCircumferenceMax)) mi")
                             .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.3))
+                            .foregroundStyle(.white.opacity(0.42))
                     }
                 }
 
                 Text("Only parking within this distance will be shown")
                     .font(.system(size: 12, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.35))
+                    .foregroundStyle(.white.opacity(0.58))
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(16)
-            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16))
+            .curbyGlassSurface(
+                tint: CurbyGlass.successTint,
+                cornerRadius: CurbyGlass.cardCornerRadius
+            )
         }
     }
 
@@ -281,10 +285,8 @@ struct OnboardingView: View {
             .frame(maxWidth: .infinity)
             .frame(height: 56)
         }
-        .glassEffect(
-            state.locationGranted ? .regular.interactive() : .regular,
-            in: RoundedRectangle(cornerRadius: 16)
-        )
+        .buttonStyle(.glassProminent)
+        .tint(CurbyGlass.primaryTint)
         .disabled(!state.locationGranted)
         .opacity(state.locationGranted ? 1.0 : 0.5)
         .animation(.easeInOut(duration: 0.3), value: state.locationGranted)
@@ -295,13 +297,13 @@ struct OnboardingView: View {
     private var backgroundOrbs: some View {
         ZStack {
             Circle()
-                .fill(Color(red: 0.25, green: 0.55, blue: 1.0).opacity(0.08))
+                .fill(CurbyGlass.primaryTint.opacity(0.10))
                 .frame(width: 300, height: 300)
                 .blur(radius: 80)
                 .offset(x: -100, y: -200)
 
             Circle()
-                .fill(Color(red: 0.60, green: 0.30, blue: 0.90).opacity(0.06))
+                .fill(CurbyGlass.warningTint.opacity(0.08))
                 .frame(width: 250, height: 250)
                 .blur(radius: 60)
                 .offset(x: 120, y: 300)

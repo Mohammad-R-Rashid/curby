@@ -59,10 +59,13 @@ struct ExpandedMapView: View {
                     } label: {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(CurbyGlass.primaryTint)
                             .frame(width: 40, height: 40)
-                            .background(.ultraThinMaterial, in: Circle())
-                            .shadow(color: .black.opacity(0.1), radius: 6, y: 2)
+                            .glassEffect(.regular.interactive(), in: .circle)
+                            .overlay {
+                                Circle()
+                                    .strokeBorder(CurbyGlass.outline, lineWidth: 0.75)
+                            }
                     }
 
                     Spacer()
@@ -113,6 +116,7 @@ struct ExpandedMapView: View {
             Puck2D(bearing: .heading)
         }
         .mapStyle(colorScheme == .dark ? .dark : .standard)
+        .ornamentOptions(OrnamentOptions(compass: CompassViewOptions(visibility: .hidden)))
     }
 
     // MARK: - Bottom Bar
@@ -123,7 +127,7 @@ struct ExpandedMapView: View {
                 HStack(spacing: 12) {
                     Image(systemName: "flag.checkered")
                         .font(.system(size: 14))
-                        .foregroundStyle(.red)
+                        .foregroundStyle(CurbyGlass.destinationTint)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(dest.name)
@@ -139,18 +143,20 @@ struct ExpandedMapView: View {
 
                     Text("END")
                         .font(.system(size: 11, weight: .bold, design: .rounded))
-                        .foregroundStyle(.red)
+                        .foregroundStyle(CurbyGlass.destinationTint)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background(
                             Capsule()
-                                .fill(Color.red.opacity(0.12))
+                                .fill(CurbyGlass.destinationTint.opacity(0.15))
                         )
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-                .shadow(color: .black.opacity(0.1), radius: 8, y: 3)
+                .curbyGlassSurface(
+                    tint: CurbyGlass.destinationTint,
+                    cornerRadius: CurbyGlass.compactCornerRadius
+                )
                 .padding(.horizontal, 16)
                 .padding(.bottom, 16)
             }
@@ -209,10 +215,9 @@ struct ExpandedMapView: View {
         }
         .frame(width: 180)
         .padding(12)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(.white.opacity(0.1), lineWidth: 0.5)
+        .curbyGlassSurface(
+            tint: busyColor(zone.busyLevel),
+            cornerRadius: CurbyGlass.compactCornerRadius
         )
         .shadow(color: .black.opacity(0.1), radius: 6, y: 2)
     }

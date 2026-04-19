@@ -53,28 +53,46 @@ pnpm install
 # ── Step 2: Create Cloudflare resources ────────────────────
 echo -e "\n${YELLOW}[2/7] Creating Cloudflare resources (idempotent)...${NC}"
 
-# KV Namespace
+# KV Namespace — create if missing, then always resolve ID from account list
+# (wrangler prints JSON like \"id\": \"...\"; older regex id: \"...\" missed that.)
 echo "  Creating KV namespace: curby-config..."
-KV_OUTPUT=$(wrangler kv:namespace create curby-config 2>&1 || true)
-if echo "$KV_OUTPUT" | grep -q "already exists"; then
+KV_CREATE_OUT=$(wrangler kv namespace create curby-config 2>&1 || true)
+if echo "$KV_CREATE_OUT" | grep -qi "already exists"; then
   echo -e "  ${GREEN}✓ KV namespace already exists${NC}"
-  # Try to get existing namespace ID
-  KV_ID=$(wrangler kv:namespace list 2>/dev/null | grep -A1 'curby-config' | grep '"id"' | head -1 | sed 's/.*"id": "\(.*\)".*/\1/' || echo "")
 else
-  KV_ID=$(echo "$KV_OUTPUT" | sed -n 's/.*id = "\([^"]*\)".*/\1/p' | head -1)
   echo -e "  ${GREEN}✓ KV namespace created${NC}"
 fi
 
-if [ -n "$KV_ID" ]; then
-  echo -e "  KV ID: ${CYAN}${KV_ID}${NC}"
-  # Update wrangler.jsonc with the real KV ID
-  if [ "$(uname)" = "Darwin" ]; then
-    sed -i '' "s/REPLACE_WITH_YOUR_KV_NAMESPACE_ID/$KV_ID/g" workers/api-gateway/wrangler.jsonc
-  else
-    sed -i "s/REPLACE_WITH_YOUR_KV_NAMESPACE_ID/$KV_ID/g" workers/api-gateway/wrangler.jsonc
-  fi
-  echo -e "  ${GREEN}✓ Updated wrangler.jsonc with KV ID${NC}"
+KV_ID=$(wrangler kv namespace list 2>&1 | node -e "
+  let data = '';
+  process.stdin.on('data', chunk => { data += chunk; });
+  process.stdin.on('end', () => {
+    try {
+      const start = data.indexOf('[');
+      const end = data.lastIndexOf(']');
+      if (start === -1 || end === -1 || end <= start) return;
+      const list = JSON.parse(data.slice(start, end + 1));
+      const kv = list.find(k => k.title === 'curby-config' || (k.title && String(k.title).includes('curby-config')));
+      if (kv && kv.id) console.log(kv.id);
+    } catch (e) {}
+  });
+")
+
+if [ -z "$KV_ID" ]; then
+  echo -e "${RED}ERROR: Could not resolve KV namespace id for 'curby-config'.${NC}"
+  echo "  Run: wrangler kv namespace list"
+  echo "  Then set workers/api-gateway/wrangler.jsonc → kv_namespaces[0].id to that id."
+  exit 1
 fi
+
+echo -e "  KV ID: ${CYAN}${KV_ID}${NC}"
+# Update wrangler.jsonc with the real KV ID (idempotent if unchanged)
+if [ "$(uname)" = "Darwin" ]; then
+  sed -i '' "s/REPLACE_WITH_YOUR_KV_NAMESPACE_ID/$KV_ID/g" workers/api-gateway/wrangler.jsonc
+else
+  sed -i "s/REPLACE_WITH_YOUR_KV_NAMESPACE_ID/$KV_ID/g" workers/api-gateway/wrangler.jsonc
+fi
+echo -e "  ${GREEN}✓ Updated wrangler.jsonc with KV ID${NC}"
 
 # Queues
 echo "  Creating queue: curby-telemetry..."
@@ -91,47 +109,62 @@ echo -e "${GREEN}✓ All Cloudflare resources ready${NC}"
 # ── Step 3: Push secrets to API Gateway ────────────────────
 echo -e "\n${YELLOW}[3/7] Pushing secrets to api-gateway...${NC}"
 cd workers/api-gateway
-echo "{\"SUPABASE_URL\":\"$SUPABASE_URL\",\"SUPABASE_SECRET_KEY\":\"$SUPABASE_SECRET_KEY\",\"MAPBOX_ACCESS_TOKEN\":\"$MAPBOX_ACCESS_TOKEN\"}" | wrangler secret:bulk
+echo "{\"SUPABASE_URL\":\"$SUPABASE_URL\",\"SUPABASE_SECRET_KEY\":\"$SUPABASE_SECRET_KEY\",\"MAPBOX_ACCESS_TOKEN\":\"$MAPBOX_ACCESS_TOKEN\"}" | wrangler secret bulk
 echo -e "${GREEN}✓ API Gateway secrets set${NC}"
 cd ../..
 
 # ── Step 4: Push secrets to Session Consumer ───────────────
 echo -e "\n${YELLOW}[4/7] Pushing secrets to session-consumer...${NC}"
 cd workers/session-consumer
-echo "{\"SUPABASE_URL\":\"$SUPABASE_URL\",\"SUPABASE_SECRET_KEY\":\"$SUPABASE_SECRET_KEY\"}" | wrangler secret:bulk
+echo "{\"SUPABASE_URL\":\"$SUPABASE_URL\",\"SUPABASE_SECRET_KEY\":\"$SUPABASE_SECRET_KEY\"}" | wrangler secret bulk
 echo -e "${GREEN}✓ Session Consumer secrets set${NC}"
 cd ../..
 
 # ── Step 5: Seed remote config into KV ─────────────────────
+# Wrangler 4: no --pipe; use --path (see https://developers.cloudflare.com/kv/reference/kv-commands/)
 echo -e "\n${YELLOW}[5/7] Seeding remote config into KV...${NC}"
-if [ -n "$KV_ID" ]; then
-  node scripts/seed-config.js | wrangler kv:key put --namespace-id="$KV_ID" "app_config" --pipe
-  echo -e "${GREEN}✓ Remote config seeded${NC}"
-else
-  echo -e "${YELLOW}⚠ Could not detect KV namespace ID. Seed config manually:${NC}"
-  echo "  node scripts/seed-config.js | wrangler kv:key put --namespace-id=<ID> \"app_config\" --pipe"
-fi
+CONFIG_TMP=$(mktemp)
+trap "rm -f \"$CONFIG_TMP\"" EXIT
+node scripts/seed-config.js >"$CONFIG_TMP"
+wrangler kv key put app_config --path="$CONFIG_TMP" --namespace-id="$KV_ID" --remote
+trap - EXIT
+rm -f "$CONFIG_TMP"
+echo -e "${GREEN}✓ Remote config seeded${NC}"
 
 # ── Step 6: Deploy all workers ─────────────────────────────
 echo -e "\n${YELLOW}[6/7] Deploying all workers...${NC}"
 
 echo "  Deploying api-gateway..."
-cd workers/api-gateway && wrangler deploy && cd ../..
+API_DEPLOY_OUT=$(cd workers/api-gateway && wrangler deploy 2>&1) || {
+  echo "$API_DEPLOY_OUT"
+  exit 1
+}
+echo "$API_DEPLOY_OUT"
+# workers.dev URL comes from deploy output; `wrangler deployments list` does not include it
+WORKER_NAME=$(node -e "
+  const fs = require('fs');
+  const c = fs.readFileSync('workers/api-gateway/wrangler.jsonc', 'utf8');
+  const m = c.match(/\"name\"\\s*:\\s*\"([^\"]+)\"/);
+  process.stdout.write(m ? m[1] : '');
+")
+if [ -n "$WORKER_NAME" ]; then
+  API_URL=$(echo "$API_DEPLOY_OUT" | grep -Eo "https://${WORKER_NAME}\\.[a-zA-Z0-9_-]+\\.workers\\.dev" | head -1)
+fi
+if [ -z "$API_URL" ]; then
+  API_URL=$(echo "$API_DEPLOY_OUT" | grep -Eo 'https://[a-zA-Z0-9_.-]+\.workers\.dev' | head -1)
+fi
 echo -e "  ${GREEN}✓ api-gateway deployed${NC}"
 
 echo "  Deploying telemetry-consumer..."
-cd workers/telemetry-consumer && wrangler deploy && cd ../..
+(cd workers/telemetry-consumer && wrangler deploy)
 echo -e "  ${GREEN}✓ telemetry-consumer deployed${NC}"
 
 echo "  Deploying session-consumer..."
-cd workers/session-consumer && wrangler deploy && cd ../..
+(cd workers/session-consumer && wrangler deploy)
 echo -e "  ${GREEN}✓ session-consumer deployed${NC}"
 
 # ── Step 7: Verify ─────────────────────────────────────────
 echo -e "\n${YELLOW}[7/7] Verifying deployment...${NC}"
-
-# Get the worker URL
-API_URL=$(wrangler deployments list --config workers/api-gateway/wrangler.jsonc 2>/dev/null | sed -n 's/.*\(https:\/\/[^ ]*\).*/\1/p' | head -1)
 
 if [ -n "$API_URL" ]; then
   echo -e "  API URL: ${CYAN}${API_URL}${NC}"

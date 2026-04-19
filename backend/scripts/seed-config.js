@@ -2,7 +2,7 @@
 // ============================================================
 // Seed Remote Config into Cloudflare KV
 // ============================================================
-// Usage: npx wrangler kv:key put --namespace-id=<ID> "app_config" --path=./config.json
+// Upload (remote KV): wrangler kv key put app_config --path=./config.json --namespace-id=<ID> --remote
 //
 // Or run this script which outputs the default config JSON
 // that you can then paste into the KV dashboard.

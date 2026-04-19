@@ -28,6 +28,39 @@ export class RegionCoordinatorDO extends DurableObject<Env> {
   /** Connected WebSocket sessions (keyed by userId) */
   private sessions: Map<string, DOSession> = new Map();
 
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    // When DO wakes from hibernation, in-memory Maps are dead.
+    // Restore state from WebSocket attachments!
+    this.restoreState();
+  }
+
+  private restoreState() {
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        const attachment = ws.deserializeAttachment() as Omit<DOSession, 'ws'>;
+        if (attachment) {
+          this.sessions.set(attachment.userId, { ...attachment, ws });
+          if (attachment.recommendedArea) {
+            const count = this.activeRouting.get(attachment.recommendedArea) ?? 0;
+            this.activeRouting.set(attachment.recommendedArea, count + 1);
+          }
+        }
+      } catch {
+        // Ignored
+      }
+    }
+  }
+
+  private updateSession(ws: WebSocket, updates: Partial<Omit<DOSession, 'ws'>>) {
+    const session = this.findSession(ws);
+    if (!session) return;
+    Object.assign(session, updates);
+    // Persist to Hibernation attachment
+    const { ws: _ws, ...attachment } = session;
+    ws.serializeAttachment(attachment);
+  }
+
   // ─── WebSocket Lifecycle (Hibernation API) ────────────────
 
   async fetch(request: Request): Promise<Response> {
@@ -42,13 +75,21 @@ export class RegionCoordinatorDO extends DurableObject<Env> {
     // Accept with hibernation
     this.ctx.acceptWebSocket(server, [userId]);
 
-    // Store session — lat/lng from URL are the user's CURRENT location
-    this.sessions.set(userId, {
-      ws: server,
+    // Prepare session data
+    const sessionData: Omit<DOSession, 'ws'> = {
       userId,
       userLocation: { lat, lng },
       destination: { lat, lng }, // Will be updated when find_parking is called
       status: 'searching',
+    };
+
+    // Store in Hibernation state
+    server.serializeAttachment(sessionData);
+
+    // Store in-memory session 
+    this.sessions.set(userId, {
+      ws: server,
+      ...sessionData,
     });
 
     return new Response(null, { status: 101, webSocket: client });
@@ -143,8 +184,10 @@ export class RegionCoordinatorDO extends DurableObject<Env> {
       this.send(ws, { type: 'error', code: 'NO_SESSION', message: 'Session not found' });
       return;
     }
-    session.destination = destination;
-    session.status = 'searching';
+    this.updateSession(ws, { 
+      destination, 
+      status: 'searching' 
+    });
 
     try {
       // ── PHASE 1: Broad Screening ────────────────────────
@@ -260,9 +303,11 @@ export class RegionCoordinatorDO extends DurableObject<Env> {
         best.areaId,
         (this.activeRouting.get(best.areaId) ?? 0) + 1,
       );
-      session.recommendedArea = best.areaId;
-      session.sessionId = sessionId;
-      session.status = 'routing';
+      this.updateSession(ws, {
+        recommendedArea: best.areaId,
+        sessionId,
+        status: 'routing',
+      });
 
       // 6. Send recommendation via WebSocket
       const recommendation: WSEvent = {
@@ -323,7 +368,7 @@ export class RegionCoordinatorDO extends DurableObject<Env> {
       }
     }
 
-    session.status = 'arrived';
+    this.updateSession(ws, { status: 'arrived' });
     this.send(ws, { type: 'confirmed', sessionId });
 
     // Log to session queue
@@ -353,8 +398,10 @@ export class RegionCoordinatorDO extends DurableObject<Env> {
       }
     }
 
-    session.status = 'searching';
-    session.recommendedArea = undefined;
+    this.updateSession(ws, {
+      status: 'searching',
+      recommendedArea: undefined,
+    });
 
     await this.env.SESSION_QUEUE.send({
       type: 'cancelled',

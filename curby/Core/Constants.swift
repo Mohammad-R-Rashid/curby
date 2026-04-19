@@ -88,4 +88,15 @@ enum CurbyConstants {
 
     static let maxRecentDestinations: Int = 10
     static let searchDebounceInterval: TimeInterval = 0.3
+
+    // MARK: - Parking Geometry Detail
+
+    /// At and above this zoom, parking zones start resolving into street-level geometry.
+    static let parkingStreetDetailZoom: Double = 15.0
+
+    /// At and above this zoom, parking zones start resolving into structure/building geometry.
+    static let parkingStructureDetailZoom: Double = 16.4
+
+    /// Heat zone badges stay visible below this zoom, then yield to finer geometry.
+    static let parkingBadgeCutoffZoom: Double = 15.2
 }
