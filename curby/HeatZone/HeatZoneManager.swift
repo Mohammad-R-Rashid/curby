@@ -27,11 +27,15 @@ final class HeatZoneManager {
     /// The currently selected heat zone (for detail view).
     var selectedZone: HeatZone?
 
+    /// Street surfaces that have already been rebuilt from real road geometry.
+    private var alignedStreetSurfaceReferences: Set<String> = []
+
     // MARK: - Public
 
     /// Load heat zones around a destination coordinate.
     func loadZones(around coordinate: CLLocationCoordinate2D, destinationName: String) {
         isLoading = true
+        alignedStreetSurfaceReferences = []
 
         // Simulate network delay
         Task { @MainActor in
@@ -45,6 +49,99 @@ final class HeatZoneManager {
     func clearZones() {
         heatZones = []
         selectedZone = nil
+        alignedStreetSurfaceReferences = []
+    }
+
+    /// Whether any visible street-level surfaces still need to be road-aligned.
+    var needsStreetSurfaceAlignment: Bool {
+        let streetReferences = heatZones
+            .flatMap(\.streetLevelSurfaces)
+            .compactMap(\.sourceReference)
+
+        guard !streetReferences.isEmpty else {
+            return false
+        }
+
+        return streetReferences.contains(where: { !alignedStreetSurfaceReferences.contains($0) })
+    }
+
+    /// Rebuild street-level polygons from queried road centerlines while leaving
+    /// overview zones and structure-level geometry untouched.
+    @discardableResult
+    func alignStreetSurfaces(to roads: [ParkingRoadFeature]) -> Int {
+        guard !roads.isEmpty, needsStreetSurfaceAlignment else {
+            return 0
+        }
+
+        var updatedZones = heatZones
+        var newlyAlignedReferences: Set<String> = []
+
+        for zoneIndex in updatedZones.indices {
+            let zone = updatedZones[zoneIndex]
+            let spotsByReference = Dictionary(
+                uniqueKeysWithValues: zone.parkingSpots.map { ($0.id.uuidString, $0) }
+            )
+
+            var updatedSurfaces = zone.parkingSurfaces
+            var zoneChanged = false
+
+            for surfaceIndex in updatedSurfaces.indices {
+                let surface = updatedSurfaces[surfaceIndex]
+
+                guard
+                    surface.kind == .curbSegment,
+                    let reference = surface.sourceReference,
+                    !alignedStreetSurfaceReferences.contains(reference),
+                    let spot = spotsByReference[reference],
+                    let alignedBoundary = ParkingRoadAlignment.alignedBoundary(
+                        for: spot,
+                        using: roads
+                    )
+                else {
+                    continue
+                }
+
+                updatedSurfaces[surfaceIndex] = ParkingSurface(
+                    id: surface.id,
+                    zoneID: surface.zoneID,
+                    name: surface.name,
+                    kind: surface.kind,
+                    busyLevel: surface.busyLevel,
+                    polygonCoords: alignedBoundary,
+                    minimumZoom: surface.minimumZoom,
+                    sourceReference: surface.sourceReference
+                )
+
+                newlyAlignedReferences.insert(reference)
+                zoneChanged = true
+            }
+
+            if zoneChanged {
+                updatedZones[zoneIndex] = HeatZone(
+                    id: zone.id,
+                    name: zone.name,
+                    coordinate: zone.coordinate,
+                    radius: zone.radius,
+                    busyScore: zone.busyScore,
+                    parkingSpots: zone.parkingSpots,
+                    boundaryCoords: zone.boundaryCoords,
+                    parkingSurfaces: updatedSurfaces
+                )
+            }
+        }
+
+        guard !newlyAlignedReferences.isEmpty else {
+            return 0
+        }
+
+        heatZones = updatedZones
+        alignedStreetSurfaceReferences.formUnion(newlyAlignedReferences)
+
+        if let selectedZone {
+            self.selectedZone = updatedZones.first(where: { $0.id == selectedZone.id })
+        }
+
+        return newlyAlignedReferences.count
     }
 
     // MARK: - Mock Data Generation

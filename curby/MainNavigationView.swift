@@ -31,6 +31,8 @@ struct MainNavigationView: View {
     @State private var hasSetInitialViewport = false
     @State private var currentMapZoom = CurbyConstants.zoomDefault
     @State private var selectedBuilding: StandardBuildingsFeature?
+    @State private var hasLoadedMap = false
+    @State private var isParkingRoadQueryInFlight = false
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -192,6 +194,8 @@ struct MainNavigationView: View {
                 }
             }
             .mapStyle(.standard(lightPreset: colorScheme == .dark ? .dusk : .day))
+            // Hide SDK compass — we use the custom compass in `overlayControls`.
+            .ornamentOptions(OrnamentOptions(compass: CompassViewOptions(visibility: .hidden)))
             .onStyleLoaded { _ in
                 try? proxy.map?.setStyleImportConfigProperty(
                     for: "basemap",
@@ -199,15 +203,25 @@ struct MainNavigationView: View {
                     value: true
                 )
             }
+            .onMapLoaded { _ in
+                hasLoadedMap = true
+                requestStreetSurfaceAlignmentIfNeeded(using: proxy)
+            }
             .onCameraChanged { event in
                 currentMapZoom = event.cameraState.zoom
 
                 if event.cameraState.zoom < CurbyConstants.parkingStructureDetailZoom {
                     selectedBuilding = nil
                 }
+
+                requestStreetSurfaceAlignmentIfNeeded(using: proxy)
             }
-            // Hide SDK compass — we use the custom compass in `overlayControls`.
-            .ornamentOptions(OrnamentOptions(compass: CompassViewOptions(visibility: .hidden)))
+            .onChange(of: heatZoneManager.heatZones.map(\.id)) { _, _ in
+                scheduleStreetSurfaceAlignmentIfNeeded(
+                    using: proxy,
+                    delayMilliseconds: 250
+                )
+            }
         }
     }
 
@@ -232,6 +246,52 @@ struct MainNavigationView: View {
         }
 
         selectZone(zone)
+    }
+
+    private func scheduleStreetSurfaceAlignmentIfNeeded(
+        using proxy: MapboxMaps.MapProxy,
+        delayMilliseconds: UInt64
+    ) {
+        Task { @MainActor in
+            if delayMilliseconds > 0 {
+                try? await Task.sleep(for: .milliseconds(delayMilliseconds))
+            }
+
+            requestStreetSurfaceAlignmentIfNeeded(using: proxy)
+        }
+    }
+
+    private func requestStreetSurfaceAlignmentIfNeeded(using proxy: MapboxMaps.MapProxy) {
+        guard
+            hasLoadedMap,
+            !isParkingRoadQueryInFlight,
+            currentMapZoom >= CurbyConstants.parkingStreetDetailZoom,
+            heatZoneManager.needsStreetSurfaceAlignment,
+            let map = proxy.map,
+            map.allSourceIdentifiers.contains(where: { $0.id == ParkingRoadNetworkIDs.source })
+        else {
+            return
+        }
+
+        isParkingRoadQueryInFlight = true
+
+        let options = SourceQueryOptions(
+            sourceLayerIds: [ParkingRoadNetworkIDs.sourceLayer],
+            filter: ["all"]
+        )
+
+        map.querySourceFeatures(for: ParkingRoadNetworkIDs.source, options: options) { result in
+            Task { @MainActor in
+                isParkingRoadQueryInFlight = false
+
+                guard case let .success(features) = result else {
+                    return
+                }
+
+                let roads = ParkingRoadAlignment.roadFeatures(from: features)
+                heatZoneManager.alignStreetSurfaces(to: roads)
+            }
+        }
     }
 
     // MARK: - Overlay Controls (Liquid Glass)
@@ -342,7 +402,8 @@ struct MainNavigationView: View {
                     .curbyGlassSurface(cornerRadius: CurbyGlass.barCornerRadius)
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 12)
+                // Breathing room under the sheet grabber (system drag indicator).
+                .padding(.top, 20)
                 .padding(.bottom, 8)
 
                 HeatZoneDetailView(

@@ -31,7 +31,7 @@ struct SearchView: View {
             // MARK: - Search Bar (always visible)
             searchBar
                 .padding(.horizontal, 16)
-                .padding(.top, 8)
+                .padding(.top, 14)
                 .padding(.bottom, 12)
 
             Divider()

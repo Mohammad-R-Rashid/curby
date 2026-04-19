@@ -99,7 +99,7 @@ enum HeatZoneGeometry {
     }
 
     /// Create a Mapbox Polygon from boundary coordinates.
-    static func polygon(from coords: [CLLocationCoordinate2D]) -> Polygon {
+    nonisolated static func polygon(from coords: [CLLocationCoordinate2D]) -> Polygon {
         return Polygon([coords])
     }
 
@@ -143,6 +143,29 @@ enum HeatZoneGeometry {
         return coords
     }
 
+    /// Creates a narrow corridor polygon around a road centerline so street parking
+    /// stays aligned to the mapped street instead of drifting across adjacent buildings.
+    static func corridorBoundary(
+        along centerline: [CLLocationCoordinate2D],
+        widthMeters: Double
+    ) -> [CLLocationCoordinate2D]? {
+        let path = deduplicatedCoordinates(centerline)
+        guard path.count >= 2 else { return nil }
+
+        let halfWidth = max(2.0, widthMeters / 2.0)
+        let leftEdge = offsetPath(path, distanceMeters: halfWidth, bearingDeltaDegrees: 90)
+        let rightEdge = offsetPath(path, distanceMeters: halfWidth, bearingDeltaDegrees: -90).reversed()
+
+        guard leftEdge.count >= 2, rightEdge.count >= 2 else { return nil }
+
+        var coords = leftEdge + rightEdge
+        if let first = coords.first {
+            coords.append(first)
+        }
+
+        return coords
+    }
+
     /// Offsets a coordinate by local north/east metre values.
     static func offsetCoordinate(
         from coordinate: CLLocationCoordinate2D,
@@ -158,12 +181,41 @@ enum HeatZoneGeometry {
         )
     }
 
+    /// Offsets a coordinate by a distance in metres at a bearing in degrees.
+    static func offsetCoordinate(
+        from coordinate: CLLocationCoordinate2D,
+        distanceMeters: Double,
+        bearingDegrees: Double
+    ) -> CLLocationCoordinate2D {
+        let radians = bearingDegrees * .pi / 180.0
+        let northMeters = distanceMeters * cos(radians)
+        let eastMeters = distanceMeters * sin(radians)
+
+        return offsetCoordinate(
+            from: coordinate,
+            northMeters: northMeters,
+            eastMeters: eastMeters
+        )
+    }
+
+    /// Converts a coordinate delta into local north/east metre offsets.
+    static func meterOffset(
+        from origin: CLLocationCoordinate2D,
+        to coordinate: CLLocationCoordinate2D
+    ) -> (north: Double, east: Double) {
+        let northMeters = (coordinate.latitude - origin.latitude) * 111_320.0
+        let eastMeters = (coordinate.longitude - origin.longitude)
+            * (111_320.0 * cos(origin.latitude * .pi / 180.0))
+
+        return (north: northMeters, east: eastMeters)
+    }
+
     /// Converts parking surfaces into a GeoJSON feature collection for style-layer rendering.
-    static func featureCollection(for surfaces: [ParkingSurface]) -> FeatureCollection {
+    nonisolated static func featureCollection(for surfaces: [ParkingSurface]) -> FeatureCollection {
         FeatureCollection(features: surfaces.map(feature(for:)))
     }
 
-    static func feature(for surface: ParkingSurface) -> Feature {
+    nonisolated static func feature(for surface: ParkingSurface) -> Feature {
         var feature = Feature(geometry: .polygon(polygon(from: surface.polygonCoords)))
         feature.identifier = .string(surface.id.uuidString)
         feature.properties = [
@@ -229,5 +281,58 @@ enum HeatZoneGeometry {
         case .busy: return Color(red: 1.0, green: 0.70, blue: 0.20)
         case .veryBusy: return Color(red: 1.0, green: 0.35, blue: 0.30)
         }
+    }
+
+    private static func deduplicatedCoordinates(
+        _ coordinates: [CLLocationCoordinate2D]
+    ) -> [CLLocationCoordinate2D] {
+        var result: [CLLocationCoordinate2D] = []
+
+        for coordinate in coordinates {
+            guard let last = result.last else {
+                result.append(coordinate)
+                continue
+            }
+
+            if coordinate.distance(to: last) > 0.5 {
+                result.append(coordinate)
+            }
+        }
+
+        return result
+    }
+
+    private static func offsetPath(
+        _ coordinates: [CLLocationCoordinate2D],
+        distanceMeters: Double,
+        bearingDeltaDegrees: Double
+    ) -> [CLLocationCoordinate2D] {
+        coordinates.enumerated().map { index, coordinate in
+            let tangentBearing = pathBearing(at: index, in: coordinates)
+            return offsetCoordinate(
+                from: coordinate,
+                distanceMeters: distanceMeters,
+                bearingDegrees: tangentBearing + bearingDeltaDegrees
+            )
+        }
+    }
+
+    private static func pathBearing(
+        at index: Int,
+        in coordinates: [CLLocationCoordinate2D]
+    ) -> Double {
+        if coordinates.count < 2 {
+            return 0
+        }
+
+        if index == 0 {
+            return coordinates[0].direction(to: coordinates[1])
+        }
+
+        if index == coordinates.count - 1 {
+            return coordinates[coordinates.count - 2].direction(to: coordinates[index])
+        }
+
+        return coordinates[index - 1].direction(to: coordinates[index + 1])
     }
 }

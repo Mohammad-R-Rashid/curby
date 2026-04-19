@@ -30,6 +30,11 @@ struct ParkingZoneMapStyleContent: MapStyleContent {
         let garageSurfaces = visibleSurfaces.filter { $0.kind == .garageFootprint }
         let lotSurfaces = visibleSurfaces.filter { $0.kind == .lotFootprint }
 
+        VectorSource(id: ParkingRoadNetworkIDs.source)
+            .url("mapbox://mapbox.mapbox-streets-v8")
+
+        roadLoaderLayer
+
         if !overviewSurfaces.isEmpty {
             surfaceGroup(
                 idPrefix: "parking-overview",
@@ -65,6 +70,17 @@ struct ParkingZoneMapStyleContent: MapStyleContent {
                 interactionLayerID: ParkingZoneLayerIDs.lotHitLayer
             )
         }
+    }
+
+    private var roadLoaderLayer: LineLayer {
+        LineLayer(id: ParkingRoadNetworkIDs.loaderLayer, source: ParkingRoadNetworkIDs.source)
+            .sourceLayer(ParkingRoadNetworkIDs.sourceLayer)
+            .lineColor(StyleColor(.white))
+            .lineOpacity(0.001)
+            .lineWidth(0.5)
+            .lineCap(.round)
+            .lineJoin(.round)
+            .slot(.bottom)
     }
 
     @MapStyleContentBuilder

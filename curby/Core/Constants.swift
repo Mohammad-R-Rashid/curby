@@ -99,4 +99,13 @@ enum CurbyConstants {
 
     /// Heat zone badges stay visible below this zoom, then yield to finer geometry.
     static let parkingBadgeCutoffZoom: Double = 15.2
+
+    /// Maximum distance allowed when snapping a mock street parking segment to a mapped road.
+    static let parkingRoadSnapDistanceMeters: Double = 65.0
+
+    /// Visual corridor width for curbside parking rendered from a street centerline.
+    static let parkingStreetCorridorWidthMeters: Double = 6.5
+
+    /// Visual corridor width for metered parking rendered from a street centerline.
+    static let parkingMeteredCorridorWidthMeters: Double = 5.0
 }
