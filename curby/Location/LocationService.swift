@@ -51,8 +51,13 @@ final class LocationService: NSObject {
 
     /// Request location permissions. Safe to call multiple times.
     func requestPermission() {
-        if authorizationStatus == .notDetermined {
+        switch authorizationStatus {
+        case .notDetermined:
             locationManager.requestWhenInUseAuthorization()
+        case .authorizedWhenInUse:
+            locationManager.requestAlwaysAuthorization()
+        default:
+            break
         }
     }
 
@@ -75,6 +80,7 @@ final class LocationService: NSObject {
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
         locationManager.activityType = .automotiveNavigation
         locationManager.distanceFilter = kCLDistanceFilterNone // High-frequency
+        // Background updates enabled dynamically when Always is granted.
         locationManager.allowsBackgroundLocationUpdates = false
         locationManager.showsBackgroundLocationIndicator = false
         locationManager.headingFilter = 5 // Degrees — reduces noise
@@ -121,7 +127,13 @@ extension LocationService: CLLocationManagerDelegate {
             authorizationStatus = manager.authorizationStatus
 
             switch manager.authorizationStatus {
-            case .authorizedWhenInUse, .authorizedAlways:
+            case .authorizedAlways:
+                locationManager.allowsBackgroundLocationUpdates = true
+                locationManager.showsBackgroundLocationIndicator = true
+                startUpdating()
+            case .authorizedWhenInUse:
+                locationManager.allowsBackgroundLocationUpdates = false
+                locationManager.showsBackgroundLocationIndicator = false
                 startUpdating()
             case .denied, .restricted:
                 stopUpdating()

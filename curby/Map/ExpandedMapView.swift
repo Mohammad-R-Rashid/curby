@@ -6,6 +6,7 @@
 //
 
 import MapboxMaps
+import PhosphorSwift
 import SwiftUI
 
 /// Full-screen map showing all heat zones in the area.
@@ -57,9 +58,11 @@ struct ExpandedMapView: View {
                     Button {
                         dismiss()
                     } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 16, weight: .semibold))
+                        Ph.caretLeft.bold
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
                             .foregroundStyle(CurbyGlass.primaryTint)
+                            .frame(width: 16, height: 16)
                             .frame(width: 40, height: 40)
                             .glassEffect(.regular.interactive(), in: .circle)
                             .overlay {
@@ -125,9 +128,11 @@ struct ExpandedMapView: View {
         Group {
             if let dest = destination {
                 HStack(spacing: 12) {
-                    Image(systemName: "flag.checkered")
-                        .font(.system(size: 14))
+                    Ph.flagCheckered.regular
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
                         .foregroundStyle(CurbyGlass.destinationTint)
+                        .frame(width: 16, height: 16)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(dest.name)

@@ -6,6 +6,7 @@
 //
 
 import MapKit
+import PhosphorSwift
 import SwiftUI
 
 /// Sheet content that fully adapts based on app state.
@@ -73,9 +74,11 @@ struct SearchView: View {
     private var searchBar: some View {
         GlassEffectContainer(spacing: CurbyGlass.chromeSpacing) {
             HStack(spacing: 12) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 16, weight: .medium))
+                Ph.magnifyingGlass.regular
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
                     .foregroundStyle(CurbyGlass.primaryTint)
+                    .frame(width: 17, height: 17)
 
                 if let dest = searchState.selectedDestination, !searchState.isSearchActive {
                     // Destination mode — name + subtitle in the bar (no duplicate header card)
@@ -98,7 +101,7 @@ struct SearchView: View {
 
                         if showRecenterButton {
                             barAccessoryButton(
-                                symbol: "location.fill",
+                                icon: .crosshairSimple,
                                 tint: CurbyGlass.primaryTint,
                                 accessibilityLabel: "Recenter map on your location"
                             ) {
@@ -107,7 +110,7 @@ struct SearchView: View {
                         }
 
                         barAccessoryButton(
-                            symbol: "xmark",
+                            icon: .x,
                             tint: .secondary,
                             accessibilityLabel: "Clear destination"
                         ) {
@@ -127,7 +130,7 @@ struct SearchView: View {
 
                     if !searchState.searchText.isEmpty {
                         barAccessoryButton(
-                            symbol: "xmark",
+                            icon: .x,
                             tint: .secondary,
                             accessibilityLabel: "Clear search"
                         ) {
@@ -139,7 +142,7 @@ struct SearchView: View {
 
                     if showRecenterButton {
                         barAccessoryButton(
-                            symbol: "location.fill",
+                            icon: .crosshairSimple,
                             tint: CurbyGlass.primaryTint,
                             accessibilityLabel: "Recenter map on your location"
                         ) {
@@ -167,8 +170,10 @@ struct SearchView: View {
             openInMaps(coordinate: dest.coordinate, name: dest.name)
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: "arrow.triangle.turn.up.right.diamond.fill")
-                    .font(.system(size: 16, weight: .semibold))
+                Ph.navigationArrow.fill
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 18, height: 18)
 
                 Text("Navigate")
                     .font(.system(size: 17, weight: .semibold))
@@ -204,9 +209,11 @@ struct SearchView: View {
                                 .fill(CurbyGlass.primaryTint.opacity(0.16))
                                 .frame(width: 36, height: 36)
 
-                            Image(systemName: "mappin")
-                                .font(.system(size: 14, weight: .medium))
+                            Ph.mapPin.fill
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
                                 .foregroundStyle(CurbyGlass.primaryTint)
+                                .frame(width: 15, height: 15)
                         }
 
                         VStack(alignment: .leading, spacing: 2) {
@@ -222,9 +229,11 @@ struct SearchView: View {
 
                         Spacer()
 
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 11, weight: .semibold))
+                        Ph.caretRight.bold
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
                             .foregroundStyle(.tertiary)
+                            .frame(width: 11, height: 11)
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
@@ -256,7 +265,7 @@ struct SearchView: View {
 
     private var heatZonesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(title: "Parking Zones", icon: "circle.hexagongrid")
+            sectionHeader(title: "Parking Zones", icon: .mapPinArea)
 
             VStack(spacing: 8) {
                 ForEach(heatZoneManager.heatZones) { zone in
@@ -312,9 +321,11 @@ struct SearchView: View {
                         .fill(HeatZoneGeometry.color(for: zone.busyLevel))
                 )
 
-            Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .semibold))
+            Ph.caretRight.bold
+                .resizable()
+                .aspectRatio(contentMode: .fit)
                 .foregroundStyle(.tertiary)
+                .frame(width: 11, height: 11)
         }
         .padding(14)
         .curbyGlassSurface(
@@ -327,7 +338,7 @@ struct SearchView: View {
 
     private var placesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(title: "Places", icon: "mappin.and.ellipse")
+            sectionHeader(title: "Places", icon: .mapPinArea)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {
@@ -353,9 +364,11 @@ struct SearchView: View {
 
     private func placeCircle(location: PopularLocation) -> some View {
         VStack(spacing: 6) {
-            Image(systemName: location.icon)
-                .font(.system(size: 22, weight: .medium))
+            location.icon.regular
+                .resizable()
+                .aspectRatio(contentMode: .fit)
                 .foregroundStyle(HeatZoneGeometry.color(for: location.busyLevel))
+                .frame(width: 26, height: 26)
                 .frame(width: 56, height: 56)
                 .glassEffect(
                     .regular.tint(HeatZoneGeometry.color(for: location.busyLevel).opacity(0.18)),
@@ -382,7 +395,7 @@ struct SearchView: View {
 
     private var recentsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(title: "Recents", icon: "clock")
+            sectionHeader(title: "Recents", icon: .clockCounterClockwise)
 
             VStack(spacing: 2) {
                 ForEach(searchState.recentDestinations) { recent in
@@ -402,9 +415,11 @@ struct SearchView: View {
                                     .fill(Color(.systemGray5))
                                     .frame(width: 32, height: 32)
 
-                                Image(systemName: "clock.fill")
-                                    .font(.system(size: 13))
+                                Ph.clockCounterClockwise.regular
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
                                     .foregroundStyle(.secondary)
+                                    .frame(width: 14, height: 14)
                             }
 
                             VStack(alignment: .leading, spacing: 2) {
@@ -421,9 +436,11 @@ struct SearchView: View {
 
                             Spacer()
 
-                            Image(systemName: "ellipsis")
-                                .font(.system(size: 13))
+                            Ph.dotsThree.bold
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
                                 .foregroundStyle(.tertiary)
+                                .frame(width: 16, height: 16)
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
@@ -439,15 +456,17 @@ struct SearchView: View {
     // MARK: - Helpers
 
     private func barAccessoryButton(
-        symbol: String,
+        icon: Ph,
         tint: Color,
         accessibilityLabel: String,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 15, weight: .semibold))
+            icon.bold
+                .resizable()
+                .aspectRatio(contentMode: .fit)
                 .foregroundStyle(tint)
+                .frame(width: 17, height: 17)
                 .frame(width: 32, height: 32)
                 .contentShape(.circle)
         }
@@ -455,19 +474,23 @@ struct SearchView: View {
         .accessibilityLabel(accessibilityLabel)
     }
 
-    private func sectionHeader(title: String, icon: String) -> some View {
+    private func sectionHeader(title: String, icon: Ph) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 14, weight: .semibold))
+            icon.bold
+                .resizable()
+                .aspectRatio(contentMode: .fit)
                 .foregroundStyle(CurbyGlass.primaryTint)
+                .frame(width: 15, height: 15)
 
             Text(title)
                 .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(.primary)
 
-            Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .bold))
+            Ph.caretRight.bold
+                .resizable()
+                .aspectRatio(contentMode: .fit)
                 .foregroundStyle(.secondary)
+                .frame(width: 12, height: 12)
 
             Spacer()
         }

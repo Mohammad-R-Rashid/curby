@@ -108,4 +108,7 @@ enum CurbyConstants {
 
     /// Visual corridor width for metered parking rendered from a street centerline.
     static let parkingMeteredCorridorWidthMeters: Double = 5.0
+
+    /// Maximum distance allowed when snapping a garage or lot to a mapped building footprint.
+    static let parkingStructureSnapDistanceMeters: Double = 90.0
 }

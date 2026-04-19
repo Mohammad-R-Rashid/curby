@@ -6,6 +6,7 @@
 //
 
 import CoreLocation
+import PhosphorSwift
 import SwiftUI
 
 /// Detail view for a single heat zone.
@@ -136,7 +137,7 @@ struct HeatZoneDetailView: View {
 
     private var streetParkingSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(title: "Street Parking", icon: "road.lanes")
+            sectionHeader(title: "Street Parking", icon: .roadHorizon)
 
             VStack(spacing: 8) {
                 ForEach(streetSpots) { spot in
@@ -185,8 +186,10 @@ struct HeatZoneDetailView: View {
                     }
 
                     HStack(spacing: 3) {
-                        Image(systemName: "figure.walk")
-                            .font(.system(size: 10))
+                        Ph.personSimpleWalk.regular
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 11, height: 11)
                         Text(String(format: "%.2f mi", spot.walkingDistance))
                             .font(.system(size: 12))
                     }
@@ -223,7 +226,7 @@ struct HeatZoneDetailView: View {
 
     private var garagesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(title: "Garages & Lots", icon: "building.2")
+            sectionHeader(title: "Garages & Lots", icon: .garage)
 
             VStack(spacing: 8) {
                 ForEach(lotSpots) { spot in
@@ -244,13 +247,15 @@ struct HeatZoneDetailView: View {
                     )
                     .frame(width: 44, height: 44)
 
-                Image(systemName: spot.type.icon)
-                    .font(.system(size: 18, weight: .medium))
+                spot.type.icon.regular
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
                     .foregroundStyle(
                         spot.type == .garage
                             ? Color(red: 0.30, green: 0.50, blue: 0.85)
                             : Color(red: 0.55, green: 0.75, blue: 0.40)
                     )
+                    .frame(width: 22, height: 22)
             }
 
             VStack(alignment: .leading, spacing: 4) {
@@ -261,8 +266,10 @@ struct HeatZoneDetailView: View {
                 HStack(spacing: 12) {
                     if let capacity = spot.capacityString {
                         HStack(spacing: 3) {
-                            Image(systemName: "car.fill")
-                                .font(.system(size: 10))
+                            Ph.car.fill
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: 12, height: 12)
                             Text(capacity)
                                 .font(.system(size: 12, weight: .medium))
                         }
@@ -274,8 +281,10 @@ struct HeatZoneDetailView: View {
                     }
 
                     HStack(spacing: 3) {
-                        Image(systemName: "figure.walk")
-                            .font(.system(size: 10))
+                        Ph.personSimpleWalk.regular
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 11, height: 11)
                         Text(String(format: "%.2f mi", spot.walkingDistance))
                             .font(.system(size: 12))
                     }
@@ -308,9 +317,11 @@ struct HeatZoneDetailView: View {
                     .fill(Color.red.opacity(0.15))
                     .frame(width: 40, height: 40)
 
-                Image(systemName: "flag.checkered")
-                    .font(.system(size: 16, weight: .medium))
+                Ph.flagCheckered.regular
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
                     .foregroundStyle(.red)
+                    .frame(width: 18, height: 18)
             }
 
             VStack(alignment: .leading, spacing: 2) {
@@ -353,11 +364,13 @@ struct HeatZoneDetailView: View {
             )
     }
 
-    private func sectionHeader(title: String, icon: String) -> some View {
+    private func sectionHeader(title: String, icon: Ph) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 12, weight: .semibold))
+            icon.bold
+                .resizable()
+                .aspectRatio(contentMode: .fit)
                 .foregroundStyle(isDark ? .white.opacity(0.4) : .secondary)
+                .frame(width: 13, height: 13)
 
             Text(title)
                 .font(.system(size: 13, weight: .semibold))
@@ -368,11 +381,7 @@ struct HeatZoneDetailView: View {
     }
 
     private func busyColor(_ level: BusyLevel) -> Color {
-        switch level {
-        case .open: return Color(red: 0.30, green: 0.78, blue: 0.40)
-        case .busy: return Color(red: 1.0, green: 0.70, blue: 0.20)
-        case .veryBusy: return Color(red: 1.0, green: 0.35, blue: 0.30)
-        }
+        HeatZoneGeometry.color(for: level)
     }
 }
 

@@ -28,9 +28,9 @@
 		<string>Precise location helps Curby show accurate parking availability near you.</string>
 	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Curby uses your location to show your position on the map and provide nearby parking information.</string>
-	<key>NSCalendarsUsageDescription</key>
-	<string>Curby uses your calendar to suggest destinations from upcoming events and help you find parking ahead of time.</string>
+	<string>Curby uses your location to show your position on the map and find parking near you.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Curby uses your location in the background to detect parking availability as you drive and notify you of open spots nearby.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

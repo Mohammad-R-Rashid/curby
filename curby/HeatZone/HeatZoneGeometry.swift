@@ -228,6 +228,21 @@ enum HeatZoneGeometry {
         return feature
     }
 
+    /// Stable anchor for a surface polygon, biased toward a point that stays inside the footprint.
+    nonisolated static func surfaceAnchor(
+        of polygonCoordinates: [CLLocationCoordinate2D]
+    ) -> CLLocationCoordinate2D? {
+        let polygon = polygon(from: polygonCoordinates)
+        return polygon.centerOfMass ?? polygon.centroid ?? polygon.center
+    }
+
+    /// Backward-compatible alias for older structure badge call sites.
+    nonisolated static func centroid(
+        of polygonCoordinates: [CLLocationCoordinate2D]
+    ) -> CLLocationCoordinate2D? {
+        surfaceAnchor(of: polygonCoordinates)
+    }
+
     // MARK: - Legacy Circle (kept for fallback)
 
     /// Creates a geographic circle polygon from a center coordinate and radius.
@@ -262,11 +277,11 @@ enum HeatZoneGeometry {
     static func uiColor(for level: BusyLevel) -> UIColor {
         switch level {
         case .open:
-            return UIColor(red: 0.30, green: 0.78, blue: 0.40, alpha: 1.0)
+            return UIColor(red: 0.18, green: 0.72, blue: 0.34, alpha: 1.0)
         case .busy:
-            return UIColor(red: 1.0, green: 0.70, blue: 0.20, alpha: 1.0)
+            return UIColor(red: 1.0, green: 0.48, blue: 0.10, alpha: 1.0)
         case .veryBusy:
-            return UIColor(red: 1.0, green: 0.35, blue: 0.30, alpha: 1.0)
+            return UIColor(red: 0.92, green: 0.22, blue: 0.18, alpha: 1.0)
         }
     }
 
@@ -277,9 +292,9 @@ enum HeatZoneGeometry {
     /// SwiftUI Color for a busy level.
     static func color(for level: BusyLevel) -> Color {
         switch level {
-        case .open: return Color(red: 0.30, green: 0.78, blue: 0.40)
-        case .busy: return Color(red: 1.0, green: 0.70, blue: 0.20)
-        case .veryBusy: return Color(red: 1.0, green: 0.35, blue: 0.30)
+        case .open: return Color(red: 0.18, green: 0.72, blue: 0.34)
+        case .busy: return Color(red: 1.0, green: 0.48, blue: 0.10)
+        case .veryBusy: return Color(red: 0.92, green: 0.22, blue: 0.18)
         }
     }
 

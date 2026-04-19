@@ -7,6 +7,7 @@
 
 import CoreLocation
 import Foundation
+import PhosphorSwift
 
 // MARK: - Busy Level
 
@@ -212,12 +213,12 @@ enum ParkingType: String, CaseIterable, Codable {
     case lot
     case metered
 
-    var icon: String {
+    var icon: Ph {
         switch self {
-        case .streetCurbside: return "road.lanes"
-        case .garage: return "building.2"
-        case .lot: return "car.fill"
-        case .metered: return "parkingsign.circle"
+        case .streetCurbside: return .roadHorizon
+        case .garage: return .garage
+        case .lot: return .car
+        case .metered: return .park
         }
     }
 

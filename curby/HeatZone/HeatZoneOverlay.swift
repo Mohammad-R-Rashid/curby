@@ -6,6 +6,7 @@
 //
 
 import CoreLocation
+import MapboxMaps
 import SwiftUI
 
 /// Overlay above the map showing heat zone indicators.
@@ -101,32 +102,30 @@ struct HeatZoneBadge: View {
     let zone: HeatZone
 
     var body: some View {
-        VStack(spacing: 2) {
-            Text(zone.busyLevel.label)
-                .font(.system(size: 11, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(
-                    Capsule()
-                        .fill(badgeColor)
-                        .shadow(color: badgeColor.opacity(0.4), radius: 4, y: 2)
-                )
+        VStack(spacing: 0) {
+            Text(zone.busyLevel.displayName)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(tint)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .curbyGlassSurface(tint: tint, cornerRadius: 20)
+                .shadow(color: tint.opacity(0.28), radius: 8, y: 3)
 
-            // Arrow pointing down
-            Triangle()
-                .fill(badgeColor)
-                .frame(width: 8, height: 5)
-                .rotationEffect(.degrees(180))
+            Canvas { ctx, size in
+                var path = Path()
+                path.move(to: CGPoint(x: size.width / 2, y: size.height))
+                path.addLine(to: CGPoint(x: 0, y: 0))
+                path.addLine(to: CGPoint(x: size.width, y: 0))
+                path.closeSubpath()
+                ctx.fill(path, with: .color(tint.opacity(0.45)))
+            }
+            .frame(width: 9, height: 6)
+            .offset(y: -1)
         }
     }
 
-    private var badgeColor: Color {
-        switch zone.busyLevel {
-        case .open: return Color(red: 0.30, green: 0.78, blue: 0.40)
-        case .busy: return Color(red: 1.0, green: 0.70, blue: 0.20)
-        case .veryBusy: return Color(red: 1.0, green: 0.35, blue: 0.30)
-        }
+    private var tint: Color {
+        HeatZoneGeometry.color(for: zone.busyLevel)
     }
 }
 

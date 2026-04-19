@@ -7,6 +7,7 @@
 
 import MapboxMaps
 import MapKit
+import PhosphorSwift
 import SwiftUI
 
 /// Root container post-onboarding.
@@ -30,9 +31,14 @@ struct MainNavigationView: View {
     @State private var selectedZone: HeatZone?
     @State private var hasSetInitialViewport = false
     @State private var currentMapZoom = CurbyConstants.zoomDefault
+    /// Snaps to tier boundaries so map style layers only re-diff when the display meaningfully changes.
+    @State private var renderZoom = CurbyConstants.zoomDefault
     @State private var selectedBuilding: StandardBuildingsFeature?
+    @State private var selectedStructureSurfaceID: UUID?
     @State private var hasLoadedMap = false
     @State private var isParkingRoadQueryInFlight = false
+    @State private var isParkingStructureQueryInFlight = false
+    @State private var showSettings = false
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -118,10 +124,10 @@ struct MainNavigationView: View {
                     ParkingZoneMapStyleContent(
                         zones: heatZoneManager.heatZones,
                         selectedZoneID: selectedZone?.id,
-                        zoom: currentMapZoom
+                        zoom: renderZoom
                     )
 
-                    if currentMapZoom < CurbyConstants.parkingBadgeCutoffZoom {
+                    if renderZoom < CurbyConstants.parkingBadgeCutoffZoom {
                         // Zone badges remain at overview zooms, then yield to street/building geometry.
                         ForEvery(heatZoneManager.heatZones) { zone in
                             MapViewAnnotation(coordinate: zone.coordinate) {
@@ -133,17 +139,36 @@ struct MainNavigationView: View {
                             .allowOverlap(true)
                         }
                     }
+
+                    if renderZoom >= CurbyConstants.parkingStructureDetailZoom {
+                        ForEvery(structurePinItems) { item in
+                            MapViewAnnotation(coordinate: item.coordinate) {
+                                StructureParkingPin(
+                                    item: item,
+                                    isSelected: item.id == selectedStructureSurfaceID
+                                )
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    handleStructurePinTap(item)
+                                }
+                            }
+                            .allowZElevate(true)
+                            .allowOverlap(true)
+                            .priority(item.id == selectedStructureSurfaceID ? 8 : 3)
+                        }
+                    }
                 }
 
-                if currentMapZoom >= CurbyConstants.parkingStructureDetailZoom,
+                if renderZoom >= CurbyConstants.parkingStructureDetailZoom,
                    let selectedBuilding
                 {
                     FeatureState(selectedBuilding, .init(select: true))
                 }
 
-                if currentMapZoom >= CurbyConstants.parkingStructureDetailZoom {
+                if renderZoom >= CurbyConstants.parkingStructureDetailZoom {
                     TapInteraction(.standardBuildings) { building, _ in
                         selectedBuilding = building
+                        selectedStructureSurfaceID = nil
                         return true
                     }
                 }
@@ -159,39 +184,23 @@ struct MainNavigationView: View {
                 }
 
                 TapInteraction(.layer(ParkingZoneLayerIDs.garageHitLayer), radius: 8) { feature, _ in
-                    selectZoneForSurfaceFeature(feature)
-                    return false
+                    selectStructureForSurfaceFeature(feature)
+                    return true
                 }
 
                 TapInteraction(.layer(ParkingZoneLayerIDs.lotHitLayer), radius: 8) { feature, _ in
-                    selectZoneForSurfaceFeature(feature)
-                    return false
+                    selectStructureForSurfaceFeature(feature)
+                    return true
                 }
 
                 TapInteraction { _ in
                     if currentMapZoom >= CurbyConstants.parkingStructureDetailZoom {
                         selectedBuilding = nil
+                        selectedStructureSurfaceID = nil
                     }
                     return false
                 }
 
-                // Parking spot markers (shown when a zone is selected)
-                if let zone = selectedZone {
-                    ForEvery(zone.parkingSpots) { spot in
-                        MapViewAnnotation(coordinate: spot.coordinate) {
-                            ParkingSpotMarker(spot: spot)
-                        }
-                        .allowOverlap(false)
-                    }
-                }
-
-                // Destination pin
-                if let dest = searchState.selectedDestination {
-                    MapViewAnnotation(coordinate: dest.coordinate) {
-                        DestinationPin()
-                    }
-                    .allowOverlap(true)
-                }
             }
             .mapStyle(.standard(lightPreset: colorScheme == .dark ? .dusk : .day))
             // Hide SDK compass — we use the custom compass in `overlayControls`.
@@ -205,19 +214,26 @@ struct MainNavigationView: View {
             }
             .onMapLoaded { _ in
                 hasLoadedMap = true
-                requestStreetSurfaceAlignmentIfNeeded(using: proxy)
+                requestParkingSurfaceAlignmentIfNeeded(using: proxy)
             }
             .onCameraChanged { event in
-                currentMapZoom = event.cameraState.zoom
+                let zoom = event.cameraState.zoom
+                currentMapZoom = zoom
 
-                if event.cameraState.zoom < CurbyConstants.parkingStructureDetailZoom {
-                    selectedBuilding = nil
+                if renderZoomTier(zoom) != renderZoomTier(renderZoom) {
+                    renderZoom = zoom
                 }
 
-                requestStreetSurfaceAlignmentIfNeeded(using: proxy)
+                if zoom < CurbyConstants.parkingStructureDetailZoom {
+                    if selectedBuilding != nil { selectedBuilding = nil }
+                    if selectedStructureSurfaceID != nil { selectedStructureSurfaceID = nil }
+                }
+
+                requestParkingSurfaceAlignmentIfNeeded(using: proxy)
             }
             .onChange(of: heatZoneManager.heatZones.map(\.id)) { _, _ in
-                scheduleStreetSurfaceAlignmentIfNeeded(
+                selectedStructureSurfaceID = nil
+                scheduleParkingSurfaceAlignmentIfNeeded(
                     using: proxy,
                     delayMilliseconds: 250
                 )
@@ -233,6 +249,7 @@ struct MainNavigationView: View {
             sheetDetent = .medium
         }
         selectedBuilding = nil
+        selectedStructureSurfaceID = nil
         cameraController.navigateToDestination(zone.coordinate, zoom: 17.0)
     }
 
@@ -248,7 +265,87 @@ struct MainNavigationView: View {
         selectZone(zone)
     }
 
-    private func scheduleStreetSurfaceAlignmentIfNeeded(
+    private func handleStructurePinTap(_ item: StructurePinItem) {
+        if selectedStructureSurfaceID == item.id {
+            selectZoneForStructurePin(item)
+            return
+        }
+
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
+            selectedStructureSurfaceID = item.id
+            selectedBuilding = nil
+        }
+    }
+
+    private func selectStructureForSurfaceFeature(_ feature: FeaturesetFeature) {
+        guard
+            let surfaceIDString = feature.properties["surface_id"]??.string,
+            let surfaceID = UUID(uuidString: surfaceIDString)
+        else {
+            return
+        }
+
+        if
+            selectedStructureSurfaceID == surfaceID,
+            let item = structurePinItems.first(where: { $0.id == surfaceID })
+        {
+            selectZoneForStructurePin(item)
+            return
+        }
+
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
+            selectedStructureSurfaceID = surfaceID
+            selectedBuilding = nil
+        }
+    }
+
+    private func selectZoneForStructurePin(_ item: StructurePinItem) {
+        guard let zone = heatZoneManager.heatZones.first(where: { $0.id == item.zoneID }) else {
+            return
+        }
+
+        selectZone(zone)
+    }
+
+    private func renderZoomTier(_ zoom: Double) -> Int {
+        if zoom >= CurbyConstants.parkingStructureDetailZoom { return 3 }
+        if zoom >= CurbyConstants.parkingBadgeCutoffZoom { return 2 }
+        if zoom >= CurbyConstants.parkingStreetDetailZoom { return 1 }
+        return 0
+    }
+
+    private var structurePinItems: [StructurePinItem] {
+        let visibleZones: [HeatZone]
+        if let selectedZoneID = selectedZone?.id {
+            visibleZones = heatZoneManager.heatZones.filter { $0.id == selectedZoneID }
+        } else {
+            visibleZones = heatZoneManager.heatZones
+        }
+
+        return visibleZones.flatMap { zone in
+            let spotsByReference = Dictionary(
+                uniqueKeysWithValues: zone.parkingSpots.map { ($0.id.uuidString, $0) }
+            )
+
+            return zone.visibleSurfaces(at: renderZoom)
+                .filter(\.kind.isStructureLevel)
+                .compactMap { (surface: ParkingSurface) -> StructurePinItem? in
+                    guard let coordinate = HeatZoneGeometry.surfaceAnchor(of: surface.polygonCoords) else {
+                        return nil
+                    }
+
+                    let spot = surface.sourceReference.flatMap { spotsByReference[$0] }
+                    return StructurePinItem(
+                        zoneID: zone.id,
+                        coordinate: coordinate,
+                        surface: surface,
+                        spot: spot
+                    )
+                }
+        }
+    }
+
+    private func scheduleParkingSurfaceAlignmentIfNeeded(
         using proxy: MapboxMaps.MapProxy,
         delayMilliseconds: UInt64
     ) {
@@ -257,8 +354,16 @@ struct MainNavigationView: View {
                 try? await Task.sleep(for: .milliseconds(delayMilliseconds))
             }
 
-            requestStreetSurfaceAlignmentIfNeeded(using: proxy)
+            requestParkingSurfaceAlignmentIfNeeded(using: proxy)
         }
+    }
+
+    private func requestParkingSurfaceAlignmentIfNeeded(using proxy: MapboxMaps.MapProxy) {
+        guard heatZoneManager.needsStreetSurfaceAlignment || heatZoneManager.needsStructureSurfaceAlignment else {
+            return
+        }
+        requestStreetSurfaceAlignmentIfNeeded(using: proxy)
+        requestStructureSurfaceAlignmentIfNeeded(using: proxy)
     }
 
     private func requestStreetSurfaceAlignmentIfNeeded(using proxy: MapboxMaps.MapProxy) {
@@ -276,7 +381,7 @@ struct MainNavigationView: View {
         isParkingRoadQueryInFlight = true
 
         let options = SourceQueryOptions(
-            sourceLayerIds: [ParkingRoadNetworkIDs.sourceLayer],
+            sourceLayerIds: [ParkingRoadNetworkIDs.roadSourceLayer],
             filter: ["all"]
         )
 
@@ -294,13 +399,46 @@ struct MainNavigationView: View {
         }
     }
 
+    private func requestStructureSurfaceAlignmentIfNeeded(using proxy: MapboxMaps.MapProxy) {
+        guard
+            hasLoadedMap,
+            !isParkingStructureQueryInFlight,
+            currentMapZoom >= CurbyConstants.parkingStructureDetailZoom,
+            heatZoneManager.needsStructureSurfaceAlignment,
+            let map = proxy.map,
+            map.allSourceIdentifiers.contains(where: { $0.id == ParkingRoadNetworkIDs.source })
+        else {
+            return
+        }
+
+        isParkingStructureQueryInFlight = true
+
+        let options = SourceQueryOptions(
+            sourceLayerIds: [ParkingRoadNetworkIDs.buildingSourceLayer],
+            filter: ["all"]
+        )
+
+        map.querySourceFeatures(for: ParkingRoadNetworkIDs.source, options: options) { result in
+            Task { @MainActor in
+                isParkingStructureQueryInFlight = false
+
+                guard case let .success(features) = result else {
+                    return
+                }
+
+                let buildings = ParkingStructureAlignment.buildingFeatures(from: features)
+                heatZoneManager.alignStructureSurfaces(to: buildings)
+            }
+        }
+    }
+
     // MARK: - Overlay Controls (Liquid Glass)
 
     private var overlayControls: some View {
         VStack {
             HStack {
                 Spacer()
-                compassIndicator
+                settingsButton
             }
             .padding(.horizontal, CurbyConstants.overlayPadding)
             .padding(.top, 8)
@@ -308,38 +446,39 @@ struct MainNavigationView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(24)
+        }
     }
 
-    // MARK: - Compass (Liquid Glass)
+    // MARK: - Settings Button (Liquid Glass)
 
-    private var compassIndicator: some View {
-        let heading = locationService.currentHeading?.magneticHeading ?? 0
-
-        return VStack(spacing: 0) {
-            Triangle()
-                .fill(Color.red.opacity(0.9))
-                .frame(width: 6, height: 8)
-
-            Triangle()
-                .fill(Color.white.opacity(0.6))
-                .frame(width: 6, height: 8)
-                .rotationEffect(.degrees(180))
+    private var settingsButton: some View {
+        Button {
+            showSettings = true
+        } label: {
+            Ph.gearSix.fill
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .foregroundStyle(.primary)
+                .frame(width: 18, height: 18)
+                .frame(width: 36, height: 36)
         }
-        .rotationEffect(.degrees(-heading))
-        .frame(width: 36, height: 36)
         .glassEffect(.regular, in: .circle)
         .overlay {
             Circle()
                 .strokeBorder(CurbyGlass.outline, lineWidth: 0.75)
         }
-        .opacity(heading < 15 || heading > 345 ? 0.3 : 1.0)
     }
 
     // MARK: - Recenter (sheet — moves with bottom panel)
 
     private var sheetRecenterButton: some View {
         sheetBarIconButton(
-            symbol: "location.fill",
+            icon: .crosshairSimple,
             tint: CurbyGlass.primaryTint,
             accessibilityLabel: "Recenter map on your location"
         ) {
@@ -360,14 +499,17 @@ struct MainNavigationView: View {
                         Button {
                             withAnimation {
                                 selectedZone = nil
+                                selectedStructureSurfaceID = nil
                                 if let dest = searchState.selectedDestination {
                                     cameraController.navigateToDestination(dest.coordinate)
                                 }
                             }
                         } label: {
                             HStack(spacing: 4) {
-                                Image(systemName: "chevron.left")
-                                    .font(.system(size: 14, weight: .semibold))
+                                Ph.caretLeft.bold
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(width: 13, height: 13)
                                 Text("Zones")
                                     .font(.system(size: 15, weight: .medium))
                             }
@@ -385,9 +527,11 @@ struct MainNavigationView: View {
                             Button {
                                 openInMaps(coordinate: dest.coordinate, name: dest.name)
                             } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "arrow.triangle.turn.up.right.diamond.fill")
-                                        .font(.system(size: 12))
+                                HStack(spacing: 6) {
+                                    Ph.navigationArrow.fill
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fit)
+                                        .frame(width: 14, height: 14)
                                     Text("Navigate")
                                         .font(.system(size: 13, weight: .semibold))
                                 }
@@ -432,6 +576,8 @@ struct MainNavigationView: View {
                 onClearDestination: {
                     heatZoneManager.clearZones()
                     selectedZone = nil
+                    selectedStructureSurfaceID = nil
+                    selectedBuilding = nil
                     cameraController.recenter()
                     sheetDetent = .fraction(0.30)
                 }
@@ -485,15 +631,17 @@ struct MainNavigationView: View {
     }
 
     private func sheetBarIconButton(
-        symbol: String,
+        icon: Ph,
         tint: Color,
         accessibilityLabel: String,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 16, weight: .semibold))
+            icon.bold
+                .resizable()
+                .aspectRatio(contentMode: .fit)
                 .foregroundStyle(tint)
+                .frame(width: 18, height: 18)
                 .frame(width: 32, height: 32)
                 .contentShape(.circle)
         }
@@ -502,62 +650,121 @@ struct MainNavigationView: View {
     }
 }
 
-// MARK: - Parking Spot Marker
+private struct StructurePinItem: Identifiable {
+    let zoneID: UUID
+    let coordinate: CLLocationCoordinate2D
+    let surface: ParkingSurface
+    let spot: ParkingSpot?
 
-/// A small marker shown on the map for individual parking spots.
-struct ParkingSpotMarker: View {
-    let spot: ParkingSpot
+    var id: UUID { surface.id }
 
-    var body: some View {
-        VStack(spacing: 1) {
-            Image(systemName: spot.type.icon)
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 26, height: 26)
-                .background(markerColor, in: RoundedRectangle(cornerRadius: 6))
-                .shadow(color: markerColor.opacity(0.4), radius: 3, y: 2)
+    var tint: Color {
+        HeatZoneGeometry.color(for: surface.busyLevel)
+    }
 
-            Triangle()
-                .fill(markerColor)
-                .frame(width: 8, height: 5)
-                .rotationEffect(.degrees(180))
+    var icon: Ph {
+        switch surface.kind {
+        case .garageFootprint: return .garage
+        case .lotFootprint: return .park
+        case .overviewArea, .curbSegment: return .building
         }
     }
 
-    private var markerColor: Color {
-        switch spot.type {
-        case .garage: return Color(red: 0.25, green: 0.45, blue: 0.85)
-        case .lot: return Color(red: 0.40, green: 0.70, blue: 0.35)
-        case .streetCurbside: return Color(red: 0.50, green: 0.50, blue: 0.55)
-        case .metered: return Color(red: 0.80, green: 0.60, blue: 0.20)
+    var kindLabel: String {
+        switch surface.kind {
+        case .garageFootprint:
+            return "Garage"
+        case .lotFootprint:
+            return "Lot"
+        case .overviewArea:
+            return "Zone"
+        case .curbSegment:
+            return "Street"
         }
+    }
+
+    var title: String {
+        if let spotName = spot?.lotName, !spotName.isEmpty {
+            return spotName
+        }
+        return surface.name
+    }
+
+    var compactMetricText: String {
+        if let available = spot?.spotsAvailable {
+            return "\(available)"
+        }
+        if let capacity = spot?.capacityString {
+            return capacity
+        }
+        return surface.busyLevel.label
+    }
+
+    var availabilitySummaryText: String {
+        if let capacity = spot?.capacityString {
+            return "\(capacity) spots"
+        }
+        return surface.busyLevel.displayName
+    }
+
+    var distanceSummaryText: String {
+        guard let walkingDistance = spot?.walkingDistance else {
+            return "Tap for zone"
+        }
+
+        return String(format: "%.2f mi walk", walkingDistance)
     }
 }
 
-// MARK: - Destination Pin
+private struct StructureParkingPin: View {
+    let item: StructurePinItem
+    let isSelected: Bool
 
-/// Red flag pin marking the user's final destination.
-struct DestinationPin: View {
     var body: some View {
-        VStack(spacing: 1) {
-            ZStack {
-                Circle()
-                    .fill(Color.red)
-                    .frame(width: 30, height: 30)
-                    .shadow(color: .red.opacity(0.4), radius: 4, y: 2)
-
-                Image(systemName: "flag.fill")
-                    .font(.system(size: 14, weight: .bold))
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                item.icon.fill
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
                     .foregroundStyle(.white)
+                    .frame(width: 11, height: 11)
+                    .frame(width: 20, height: 20)
+                    .background(item.tint, in: Circle())
+
+                Text(item.compactMetricText)
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .fixedSize()
             }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                Capsule()
+                    .fill(item.tint.opacity(isSelected ? 0.20 : 0.10))
+            )
+            .overlay(
+                Capsule()
+                    .strokeBorder(item.tint.opacity(isSelected ? 0.85 : 0.0), lineWidth: 1.5)
+            )
+            .curbyGlassSurface(tint: item.tint, cornerRadius: 16)
+            .shadow(
+                color: item.tint.opacity(isSelected ? 0.35 : 0.18),
+                radius: isSelected ? 10 : 5,
+                y: isSelected ? 4 : 2
+            )
+            .scaleEffect(isSelected ? 1.12 : 1.0)
+            .animation(.spring(response: 0.22, dampingFraction: 0.72), value: isSelected)
 
             Triangle()
-                .fill(Color.red)
-                .frame(width: 8, height: 5)
+                .fill(item.tint)
+                .frame(width: 10, height: 6)
                 .rotationEffect(.degrees(180))
+                .offset(y: -1)
         }
     }
 }
+
 
 // MARK: - Preview
 

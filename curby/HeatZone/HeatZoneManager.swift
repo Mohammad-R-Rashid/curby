@@ -30,12 +30,16 @@ final class HeatZoneManager {
     /// Street surfaces that have already been rebuilt from real road geometry.
     private var alignedStreetSurfaceReferences: Set<String> = []
 
+    /// Structure surfaces that have already been rebuilt from real building geometry.
+    private var alignedStructureSurfaceReferences: Set<String> = []
+
     // MARK: - Public
 
     /// Load heat zones around a destination coordinate.
     func loadZones(around coordinate: CLLocationCoordinate2D, destinationName: String) {
         isLoading = true
         alignedStreetSurfaceReferences = []
+        alignedStructureSurfaceReferences = []
 
         // Simulate network delay
         Task { @MainActor in
@@ -50,6 +54,7 @@ final class HeatZoneManager {
         heatZones = []
         selectedZone = nil
         alignedStreetSurfaceReferences = []
+        alignedStructureSurfaceReferences = []
     }
 
     /// Whether any visible street-level surfaces still need to be road-aligned.
@@ -65,6 +70,19 @@ final class HeatZoneManager {
         return streetReferences.contains(where: { !alignedStreetSurfaceReferences.contains($0) })
     }
 
+    /// Whether any visible structure-level surfaces still need to be snapped to mapped buildings.
+    var needsStructureSurfaceAlignment: Bool {
+        let structureReferences = heatZones
+            .flatMap(\.structureLevelSurfaces)
+            .compactMap(\.sourceReference)
+
+        guard !structureReferences.isEmpty else {
+            return false
+        }
+
+        return structureReferences.contains(where: { !alignedStructureSurfaceReferences.contains($0) })
+    }
+
     /// Rebuild street-level polygons from queried road centerlines while leaving
     /// overview zones and structure-level geometry untouched.
     @discardableResult
@@ -75,6 +93,7 @@ final class HeatZoneManager {
 
         var updatedZones = heatZones
         var newlyAlignedReferences: Set<String> = []
+        var attemptedReferences: Set<String> = []
 
         for zoneIndex in updatedZones.indices {
             let zone = updatedZones[zoneIndex]
@@ -91,7 +110,14 @@ final class HeatZoneManager {
                 guard
                     surface.kind == .curbSegment,
                     let reference = surface.sourceReference,
-                    !alignedStreetSurfaceReferences.contains(reference),
+                    !alignedStreetSurfaceReferences.contains(reference)
+                else {
+                    continue
+                }
+
+                attemptedReferences.insert(reference)
+
+                guard
                     let spot = spotsByReference[reference],
                     let alignedBoundary = ParkingRoadAlignment.alignedBoundary(
                         for: spot,
@@ -130,12 +156,103 @@ final class HeatZoneManager {
             }
         }
 
+        // Mark all attempted references done (success or failure) so we never retry
+        // surfaces that couldn't find a matching road in this query's result set.
+        alignedStreetSurfaceReferences.formUnion(attemptedReferences)
+
         guard !newlyAlignedReferences.isEmpty else {
             return 0
         }
 
         heatZones = updatedZones
-        alignedStreetSurfaceReferences.formUnion(newlyAlignedReferences)
+
+        if let selectedZone {
+            self.selectedZone = updatedZones.first(where: { $0.id == selectedZone.id })
+        }
+
+        return newlyAlignedReferences.count
+    }
+
+    /// Rebuild structure-level polygons from queried building footprints so garage and lot markers
+    /// can stay attached to the actual building mass instead of the original mock rectangle.
+    @discardableResult
+    func alignStructureSurfaces(to buildings: [ParkingBuildingFeature]) -> Int {
+        guard !buildings.isEmpty, needsStructureSurfaceAlignment else {
+            return 0
+        }
+
+        var updatedZones = heatZones
+        var newlyAlignedReferences: Set<String> = []
+        var attemptedReferences: Set<String> = []
+
+        for zoneIndex in updatedZones.indices {
+            let zone = updatedZones[zoneIndex]
+            let spotsByReference = Dictionary(
+                uniqueKeysWithValues: zone.parkingSpots.map { ($0.id.uuidString, $0) }
+            )
+
+            var updatedSurfaces = zone.parkingSurfaces
+            var zoneChanged = false
+
+            for surfaceIndex in updatedSurfaces.indices {
+                let surface = updatedSurfaces[surfaceIndex]
+
+                guard
+                    surface.kind.isStructureLevel,
+                    let reference = surface.sourceReference,
+                    !alignedStructureSurfaceReferences.contains(reference)
+                else {
+                    continue
+                }
+
+                attemptedReferences.insert(reference)
+
+                guard
+                    let spot = spotsByReference[reference],
+                    let alignedBoundary = ParkingStructureAlignment.alignedBoundary(
+                        for: spot,
+                        using: buildings
+                    )
+                else {
+                    continue
+                }
+
+                updatedSurfaces[surfaceIndex] = ParkingSurface(
+                    id: surface.id,
+                    zoneID: surface.zoneID,
+                    name: surface.name,
+                    kind: surface.kind,
+                    busyLevel: surface.busyLevel,
+                    polygonCoords: alignedBoundary,
+                    minimumZoom: surface.minimumZoom,
+                    sourceReference: surface.sourceReference
+                )
+
+                newlyAlignedReferences.insert(reference)
+                zoneChanged = true
+            }
+
+            if zoneChanged {
+                updatedZones[zoneIndex] = HeatZone(
+                    id: zone.id,
+                    name: zone.name,
+                    coordinate: zone.coordinate,
+                    radius: zone.radius,
+                    busyScore: zone.busyScore,
+                    parkingSpots: zone.parkingSpots,
+                    boundaryCoords: zone.boundaryCoords,
+                    parkingSurfaces: updatedSurfaces
+                )
+            }
+        }
+
+        alignedStructureSurfaceReferences.formUnion(attemptedReferences)
+
+        guard !newlyAlignedReferences.isEmpty else {
+            return 0
+        }
+
+        heatZones = updatedZones
 
         if let selectedZone {
             self.selectedZone = updatedZones.first(where: { $0.id == selectedZone.id })

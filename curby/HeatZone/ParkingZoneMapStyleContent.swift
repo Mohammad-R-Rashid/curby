@@ -34,6 +34,7 @@ struct ParkingZoneMapStyleContent: MapStyleContent {
             .url("mapbox://mapbox.mapbox-streets-v8")
 
         roadLoaderLayer
+        buildingLoaderLayer
 
         if !overviewSurfaces.isEmpty {
             surfaceGroup(
@@ -73,13 +74,21 @@ struct ParkingZoneMapStyleContent: MapStyleContent {
     }
 
     private var roadLoaderLayer: LineLayer {
-        LineLayer(id: ParkingRoadNetworkIDs.loaderLayer, source: ParkingRoadNetworkIDs.source)
-            .sourceLayer(ParkingRoadNetworkIDs.sourceLayer)
+        LineLayer(id: ParkingRoadNetworkIDs.roadLoaderLayer, source: ParkingRoadNetworkIDs.source)
+            .sourceLayer(ParkingRoadNetworkIDs.roadSourceLayer)
             .lineColor(StyleColor(.white))
             .lineOpacity(0.001)
             .lineWidth(0.5)
             .lineCap(.round)
             .lineJoin(.round)
+            .slot(.bottom)
+    }
+
+    private var buildingLoaderLayer: FillLayer {
+        FillLayer(id: ParkingRoadNetworkIDs.buildingLoaderLayer, source: ParkingRoadNetworkIDs.source)
+            .sourceLayer(ParkingRoadNetworkIDs.buildingSourceLayer)
+            .fillColor(StyleColor(.white))
+            .fillOpacity(0.0)
             .slot(.bottom)
     }
 
@@ -274,37 +283,37 @@ private struct ParkingSurfaceVisualStyle {
 
     static let overview = ParkingSurfaceVisualStyle(
         slot: .bottom,
-        fillOpacity: 0.18,
-        strokeOpacity: 0.28,
-        strokeWidth: 1.2,
-        selectedFillOpacity: 0.26,
-        selectedStrokeWidth: 1.8
+        fillOpacity: 0.28,
+        strokeOpacity: 0.42,
+        strokeWidth: 1.4,
+        selectedFillOpacity: 0.38,
+        selectedStrokeWidth: 2.0
     )
 
     static let street = ParkingSurfaceVisualStyle(
         slot: .middle,
-        fillOpacity: 0.32,
-        strokeOpacity: 0.62,
-        strokeWidth: 1.4,
-        selectedFillOpacity: 0.44,
-        selectedStrokeWidth: 2.2
+        fillOpacity: 0.48,
+        strokeOpacity: 0.80,
+        strokeWidth: 1.6,
+        selectedFillOpacity: 0.62,
+        selectedStrokeWidth: 2.4
     )
 
     static let garage = ParkingSurfaceVisualStyle(
-        slot: .middle,
-        fillOpacity: 0.42,
-        strokeOpacity: 0.82,
-        strokeWidth: 1.9,
-        selectedFillOpacity: 0.54,
-        selectedStrokeWidth: 2.6
+        slot: nil,
+        fillOpacity: 0.24,
+        strokeOpacity: 1.0,
+        strokeWidth: 2.4,
+        selectedFillOpacity: 0.36,
+        selectedStrokeWidth: 3.2
     )
 
     static let lot = ParkingSurfaceVisualStyle(
-        slot: .middle,
-        fillOpacity: 0.28,
-        strokeOpacity: 0.72,
-        strokeWidth: 1.6,
-        selectedFillOpacity: 0.40,
-        selectedStrokeWidth: 2.3
+        slot: nil,
+        fillOpacity: 0.22,
+        strokeOpacity: 1.0,
+        strokeWidth: 2.0,
+        selectedFillOpacity: 0.32,
+        selectedStrokeWidth: 3.0
     )
 }

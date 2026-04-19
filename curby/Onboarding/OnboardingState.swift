@@ -6,9 +6,9 @@
 //
 
 import CoreLocation
-import EventKit
 import Foundation
 import Observation
+import UIKit
 
 /// Manages the onboarding flow: permission requests and user preferences.
 @Observable
@@ -16,14 +16,16 @@ final class OnboardingState {
 
     // MARK: - Permission State
 
-    /// Whether location access has been granted.
+    /// Whether location access has been granted (WhenInUse or Always).
     private(set) var locationGranted: Bool = false
-
-    /// Whether calendar access has been granted.
-    private(set) var calendarGranted: Bool = false
 
     /// Current location authorization status for UI feedback.
     private(set) var locationStatus: CLAuthorizationStatus = .notDetermined
+
+    /// True when the user previously denied location and must go to Settings.
+    var locationDenied: Bool {
+        locationStatus == .denied || locationStatus == .restricted
+    }
 
     // MARK: - Preferences
 
@@ -45,7 +47,6 @@ final class OnboardingState {
     // MARK: - Private
 
     private let locationManager = CLLocationManager()
-    private let eventStore = EKEventStore()
     private var locationDelegate: OnboardingLocationDelegate?
 
     private static let walkingKey = "curby_walking_circumference"
@@ -57,35 +58,37 @@ final class OnboardingState {
         let saved = UserDefaults.standard.double(forKey: Self.walkingKey)
         self.walkingCircumference = saved > 0 ? saved : CurbyConstants.walkingCircumferenceDefault
 
-        // Check current permission states
+        // Check current permission state
         let status = locationManager.authorizationStatus
         self.locationStatus = status
         self.locationGranted = (status == .authorizedWhenInUse || status == .authorizedAlways)
-
-        // Calendar — check current status
-        let ekStatus = EKEventStore.authorizationStatus(for: .event)
-        self.calendarGranted = (ekStatus == .fullAccess || ekStatus == .authorized)
     }
 
     // MARK: - Permission Requests
 
-    /// Request location permission. Updates `locationGranted` when the user responds.
+    /// Request location permission.
+    ///
+    /// If the user hasn't decided yet, requests WhenInUse first.
+    /// If we already have WhenInUse, escalates to Always.
+    /// If the user previously denied, opens system Settings.
     func requestLocationPermission() {
+        if locationDenied {
+            openAppSettings()
+            return
+        }
+
         let delegate = OnboardingLocationDelegate { [weak self] status in
             self?.locationStatus = status
             self?.locationGranted = (status == .authorizedWhenInUse || status == .authorizedAlways)
         }
         self.locationDelegate = delegate
         locationManager.delegate = delegate
-        locationManager.requestWhenInUseAuthorization()
-    }
 
-    /// Request calendar permission.
-    func requestCalendarPermission() {
-        eventStore.requestFullAccessToEvents { [weak self] granted, _ in
-            DispatchQueue.main.async {
-                self?.calendarGranted = granted
-            }
+        // If we already have WhenInUse, escalate to Always.
+        if locationStatus == .authorizedWhenInUse {
+            locationManager.requestAlwaysAuthorization()
+        } else {
+            locationManager.requestWhenInUseAuthorization()
         }
     }
 
@@ -98,6 +101,21 @@ final class OnboardingState {
     static var storedWalkingCircumference: Double {
         let saved = UserDefaults.standard.double(forKey: walkingKey)
         return saved > 0 ? saved : CurbyConstants.walkingCircumferenceDefault
+    }
+
+    /// Refresh permission states from system (for Settings screen re-entry).
+    func refreshPermissions() {
+        let status = locationManager.authorizationStatus
+        locationStatus = status
+        locationGranted = (status == .authorizedWhenInUse || status == .authorizedAlways)
+    }
+
+    // MARK: - Helpers
+
+    /// Opens the app's system Settings page.
+    func openAppSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 }
 

@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		89EE5FB72F94197500804594 /* MapboxMaps in Frameworks */ = {isa = PBXBuildFile; productRef = 894496302F93FB0100026B35 /* MapboxMaps */; };
+		89A1B2C32F9500AA00660AE9 /* PhosphorSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 89A1B2C42F9500AA00660AE9 /* PhosphorSwift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -57,6 +58,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				89EE5FB72F94197500804594 /* MapboxMaps in Frameworks */,
+				89A1B2C32F9500AA00660AE9 /* PhosphorSwift in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -118,6 +120,7 @@
 			name = curby;
 			packageProductDependencies = (
 				894496302F93FB0100026B35 /* MapboxMaps */,
+				89A1B2C42F9500AA00660AE9 /* PhosphorSwift */,
 			);
 			productName = curby;
 			productReference = 894495F32F93FA2200026B35 /* curby.app */;
@@ -203,6 +206,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				894496312F93FB0100026B35 /* XCRemoteSwiftPackageReference "mapbox-maps-ios" */,
+				89865B002F94989C00660AE9 /* XCRemoteSwiftPackageReference "swift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 894495F42F93FA2200026B35 /* Products */;
@@ -595,6 +599,14 @@
 				minimumVersion = 11.0.0;
 			};
 		};
+		89865B002F94989C00660AE9 /* XCRemoteSwiftPackageReference "swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/phosphor-icons/swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.1.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -602,6 +614,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 894496312F93FB0100026B35 /* XCRemoteSwiftPackageReference "mapbox-maps-ios" */;
 			productName = MapboxMaps;
+		};
+		89A1B2C42F9500AA00660AE9 /* PhosphorSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 89865B002F94989C00660AE9 /* XCRemoteSwiftPackageReference "swift" */;
+			productName = PhosphorSwift;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

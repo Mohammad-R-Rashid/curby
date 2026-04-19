@@ -10,8 +10,10 @@ import MapboxMaps
 
 enum ParkingRoadNetworkIDs {
     static let source = "parking-road-network-source"
-    static let loaderLayer = "parking-road-network-loader-layer"
-    static let sourceLayer = "road"
+    static let roadLoaderLayer = "parking-road-network-loader-layer"
+    static let buildingLoaderLayer = "parking-building-network-loader-layer"
+    static let roadSourceLayer = "road"
+    static let buildingSourceLayer = "building"
 }
 
 struct ParkingRoadFeature {

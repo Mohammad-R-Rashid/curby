@@ -2,158 +2,188 @@
 //  OnboardingView.swift
 //  curby
 //
-//  First-launch welcome screen — permissions and walking preference.
+//  Premium single-screen onboarding — permissions + walking distance.
 //
 
+import PhosphorSwift
 import SwiftUI
 
-/// Welcome screen shown on first launch.
+/// Single-screen welcome shown on first launch.
 ///
-/// Requests location and calendar permissions, lets the user set
-/// their comfortable walking distance, then navigates to the main app.
-/// Uses Liquid Glass design throughout.
+/// Minimal text, premium aesthetic. Requests location (Always) and
+/// calendar permissions, lets the user set walking distance, then
+/// transitions to the main app.
 struct OnboardingView: View {
 
     @State private var state = OnboardingState()
     @Binding var hasCompletedOnboarding: Bool
 
-    @State private var showContent = false
+    // MARK: - Animation State
+
+    @State private var showHero = false
+    @State private var showPermissions = false
+    @State private var showSlider = false
+    @State private var showCTA = false
+    @State private var pulseGlow = false
 
     var body: some View {
         ZStack {
-            // Background gradient
-            LinearGradient(
-                colors: [
-                    Color(red: 0.04, green: 0.08, blue: 0.14),
-                    Color(red: 0.08, green: 0.14, blue: 0.24),
-                    Color(red: 0.03, green: 0.06, blue: 0.12)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            // Deep gradient background
+            backgroundGradient
 
-            // Subtle animated circles in background
+            // Ambient glow orbs
             backgroundOrbs
 
-            ScrollView {
-                VStack(spacing: 32) {
-                    // MARK: - Header
-                    headerSection
-                        .opacity(showContent ? 1 : 0)
-                        .offset(y: showContent ? 0 : 30)
+            VStack(spacing: 0) {
+                Spacer()
 
-                    // MARK: - Permission Cards (Liquid Glass)
-                    permissionSection
-                        .opacity(showContent ? 1 : 0)
-                        .offset(y: showContent ? 0 : 40)
+                // MARK: - Hero
+                heroSection
+                    .opacity(showHero ? 1 : 0)
+                    .scaleEffect(showHero ? 1 : 0.85)
+                    .offset(y: showHero ? 0 : 20)
 
-                    // MARK: - Walking Circumference (Liquid Glass)
-                    walkingSection
-                        .opacity(showContent ? 1 : 0)
-                        .offset(y: showContent ? 0 : 50)
+                Spacer()
+                    .frame(height: 48)
 
-                    // MARK: - Continue Button (Liquid Glass)
-                    continueButton
-                        .opacity(showContent ? 1 : 0)
-                        .offset(y: showContent ? 0 : 60)
+                // MARK: - Permissions Card
+                permissionsCard
+                    .opacity(showPermissions ? 1 : 0)
+                    .offset(y: showPermissions ? 0 : 30)
 
-                    Spacer(minLength: 40)
-                }
-                .padding(.horizontal, 24)
-                .padding(.top, 60)
+                Spacer()
+                    .frame(height: 20)
+
+                // MARK: - Walking Slider
+                walkingSliderRow
+                    .opacity(showSlider ? 1 : 0)
+                    .offset(y: showSlider ? 0 : 24)
+
+                Spacer()
+
+                // MARK: - CTA
+                getStartedButton
+                    .opacity(showCTA ? 1 : 0)
+                    .offset(y: showCTA ? 0 : 20)
+
+                Spacer()
+                    .frame(height: 40)
             }
+            .padding(.horizontal, 28)
         }
-        .onAppear {
-            withAnimation(.easeOut(duration: 0.8).delay(0.2)) {
-                showContent = true
-            }
-        }
+        .onAppear { runEntrance() }
     }
 
-    // MARK: - Header
+    // MARK: - Hero Section
 
-    private var headerSection: some View {
-        VStack(spacing: 12) {
-            // App icon
-            Image(systemName: "car.side.fill")
-                .font(.system(size: 32, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 80, height: 80)
-                .glassEffect(.regular.tint(CurbyGlass.primaryTint.opacity(0.18)), in: .circle)
-                .overlay {
-                    Circle()
-                        .strokeBorder(CurbyGlass.outline, lineWidth: 0.75)
-                }
-                .shadow(color: CurbyGlass.primaryTint.opacity(0.35), radius: 20, y: 8)
-
-            Text("Welcome to Curby")
-                .font(.system(size: 34, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-
-            Text("Find parking before you arrive")
-                .font(.system(size: 17, weight: .regular))
-                .foregroundStyle(.white.opacity(0.72))
-        }
-        .padding(.bottom, 8)
-    }
-
-    // MARK: - Permissions (Liquid Glass)
-
-    private var permissionSection: some View {
+    private var heroSection: some View {
         VStack(spacing: 16) {
-            Text("Get Started")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.48))
-                .textCase(.uppercase)
-                .tracking(1.2)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            // Animated icon with glow ring
+            ZStack {
+                // Outer pulsing glow
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [
+                                CurbyGlass.primaryTint.opacity(0.35),
+                                CurbyGlass.primaryTint.opacity(0.0)
+                            ],
+                            center: .center,
+                            startRadius: 30,
+                            endRadius: 80
+                        )
+                    )
+                    .frame(width: 160, height: 160)
+                    .scaleEffect(pulseGlow ? 1.15 : 0.95)
+                    .opacity(pulseGlow ? 0.7 : 0.4)
 
-            // Location permission
-            permissionCard(
-                icon: "location.fill",
-                iconColor: CurbyGlass.primaryTint,
-                title: "Location Access",
-                description: "See your position and find parking near you",
+                // Glass icon circle
+                Ph.car.fill
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .foregroundStyle(.white)
+                    .frame(width: 42, height: 42)
+                    .frame(width: 88, height: 88)
+                    .glassEffect(.regular.tint(CurbyGlass.primaryTint.opacity(0.22)), in: .circle)
+                    .overlay {
+                        Circle()
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: [
+                                        .white.opacity(0.4),
+                                        CurbyGlass.primaryTint.opacity(0.2),
+                                        .white.opacity(0.1)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1.5
+                            )
+                    }
+                    .shadow(color: CurbyGlass.primaryTint.opacity(0.4), radius: 24, y: 8)
+            }
+
+            // Tagline
+            VStack(spacing: 6) {
+                Text("Find parking")
+                    .font(.system(size: 36, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+
+                Text("before you arrive")
+                    .font(.system(size: 36, weight: .bold, design: .rounded))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [
+                                CurbyGlass.primaryTint,
+                                CurbyGlass.primaryTint.opacity(0.7)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+            }
+        }
+    }
+
+    // MARK: - Permissions Card
+
+    private var permissionsCard: some View {
+        VStack(spacing: 0) {
+            // Location row
+            permissionRow(
+                icon: .crosshairSimple,
+                tint: CurbyGlass.primaryTint,
+                title: "Location",
                 isGranted: state.locationGranted,
+                isDenied: state.locationDenied,
                 isRequired: true
             ) {
                 state.requestLocationPermission()
             }
-
-            // Calendar permission
-            permissionCard(
-                icon: "calendar",
-                iconColor: CurbyGlass.warningTint,
-                title: "Calendar Access",
-                description: "Smart suggestions from your upcoming events",
-                isGranted: state.calendarGranted,
-                isRequired: false
-            ) {
-                state.requestCalendarPermission()
-            }
         }
+        .curbyGlassSurface(cornerRadius: CurbyGlass.cardCornerRadius)
     }
 
-    private func permissionCard(
-        icon: String,
-        iconColor: Color,
+    private func permissionRow(
+        icon: Ph,
+        tint: Color,
         title: String,
-        description: String,
         isGranted: Bool,
+        isDenied: Bool,
         isRequired: Bool,
         action: @escaping () -> Void
     ) -> some View {
-        HStack(spacing: 16) {
-            ZStack {
-                Image(systemName: icon)
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(iconColor)
-                    .frame(width: 48, height: 48)
-            }
-            .curbyGlassSurface(tint: iconColor, cornerRadius: 14)
+        HStack(spacing: 14) {
+            icon.bold
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .foregroundStyle(tint)
+                .frame(width: 20, height: 20)
+                .frame(width: 38, height: 38)
+                .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 4) {
+            // Title + badge
+            VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(title)
                         .font(.system(size: 16, weight: .semibold))
@@ -161,111 +191,91 @@ struct OnboardingView: View {
 
                     if isRequired {
                         Text("Required")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.7))
-                            .padding(.horizontal, 6)
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.6))
+                            .padding(.horizontal, 5)
                             .padding(.vertical, 2)
-                            .background(
-                                Capsule()
-                                    .fill(.white.opacity(0.14))
-                            )
+                            .background(Capsule().fill(.white.opacity(0.1)))
                     }
                 }
 
-                Text(description)
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.64))
+                if isDenied {
+                    Text("Denied — tap to open Settings")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.45))
+                }
             }
 
             Spacer()
 
+            // Status / action
             if isGranted {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 24))
-                    .foregroundStyle(.green)
+                Ph.checkCircle.fill
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .foregroundStyle(CurbyGlass.successTint)
+                    .frame(width: 24, height: 24)
                     .transition(.scale.combined(with: .opacity))
             } else {
                 Button(action: action) {
-                    Text("Allow")
-                        .font(.system(size: 14, weight: .semibold))
-                        .frame(minWidth: 72)
+                    Text(isDenied ? "Settings" : "Allow")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(
+                            Capsule()
+                                .fill(tint.opacity(0.25))
+                        )
+                        .overlay(
+                            Capsule()
+                                .strokeBorder(tint.opacity(0.4), lineWidth: 0.75)
+                        )
                 }
-                .buttonStyle(.glass)
-                .tint(iconColor)
             }
         }
-        .padding(16)
-        .curbyGlassSurface(tint: iconColor, cornerRadius: CurbyGlass.cardCornerRadius)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
         .animation(.spring(response: 0.3), value: isGranted)
     }
 
-    // MARK: - Walking Circumference (Liquid Glass)
+    // MARK: - Walking Slider Row
 
-    private var walkingSection: some View {
-        VStack(spacing: 16) {
-            Text("Walking Distance")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.48))
-                .textCase(.uppercase)
-                .tracking(1.2)
-                .frame(maxWidth: .infinity, alignment: .leading)
+    private var walkingSliderRow: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Ph.personSimpleWalk.bold
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .foregroundStyle(CurbyGlass.successTint)
+                    .frame(width: 18, height: 18)
 
-            VStack(spacing: 20) {
-                HStack {
-                    Image(systemName: "figure.walk")
-                        .font(.system(size: 20))
-                        .foregroundStyle(CurbyGlass.successTint)
+                Text("Walking distance")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.85))
 
-                    Text("How far will you walk?")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
+                Spacer()
 
-                    Spacer()
-
-                    Text(String(format: "%.2f mi", state.walkingCircumference))
-                        .font(.system(size: 20, weight: .bold, design: .rounded))
-                        .foregroundStyle(CurbyGlass.successTint)
-                        .contentTransition(.numericText())
-                }
-
-                // Slider
-                VStack(spacing: 8) {
-                    Slider(
-                        value: $state.walkingCircumference,
-                        in: CurbyConstants.walkingCircumferenceMin...CurbyConstants.walkingCircumferenceMax,
-                        step: CurbyConstants.walkingCircumferenceStep
-                    )
-                    .tint(CurbyGlass.successTint)
-
-                    HStack {
-                        Text("\(String(format: "%.1f", CurbyConstants.walkingCircumferenceMin)) mi")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.42))
-
-                        Spacer()
-
-                        Text("\(String(format: "%.1f", CurbyConstants.walkingCircumferenceMax)) mi")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.42))
-                    }
-                }
-
-                Text("Only parking within this distance will be shown")
-                    .font(.system(size: 12, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.58))
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text(String(format: "%.2f mi", state.walkingCircumference))
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundStyle(CurbyGlass.successTint)
+                    .contentTransition(.numericText())
             }
-            .padding(16)
-            .curbyGlassSurface(
-                tint: CurbyGlass.successTint,
-                cornerRadius: CurbyGlass.cardCornerRadius
+
+            Slider(
+                value: $state.walkingCircumference,
+                in: CurbyConstants.walkingCircumferenceMin...CurbyConstants.walkingCircumferenceMax,
+                step: CurbyConstants.walkingCircumferenceStep
             )
+            .tint(CurbyGlass.successTint)
         }
+        .padding(16)
+        .curbyGlassSurface(tint: CurbyGlass.successTint, cornerRadius: CurbyGlass.cardCornerRadius)
     }
 
-    // MARK: - Continue Button (Liquid Glass)
+    // MARK: - Get Started Button
 
-    private var continueButton: some View {
+    private var getStartedButton: some View {
         Button {
             let generator = UIImpactFeedbackGenerator(style: .medium)
             generator.impactOccurred()
@@ -278,8 +288,10 @@ struct OnboardingView: View {
                 Text("Get Started")
                     .font(.system(size: 17, weight: .semibold))
 
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 14, weight: .semibold))
+                Ph.arrowRight.bold
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 15, height: 15)
             }
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
@@ -288,27 +300,66 @@ struct OnboardingView: View {
         .buttonStyle(.glassProminent)
         .tint(CurbyGlass.primaryTint)
         .disabled(!state.locationGranted)
-        .opacity(state.locationGranted ? 1.0 : 0.5)
+        .opacity(state.locationGranted ? 1.0 : 0.45)
         .animation(.easeInOut(duration: 0.3), value: state.locationGranted)
     }
 
-    // MARK: - Background Orbs
+    // MARK: - Background
+
+    private var backgroundGradient: some View {
+        LinearGradient(
+            colors: [
+                Color(red: 0.03, green: 0.06, blue: 0.14),
+                Color(red: 0.06, green: 0.12, blue: 0.22),
+                Color(red: 0.02, green: 0.04, blue: 0.10)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .ignoresSafeArea()
+    }
 
     private var backgroundOrbs: some View {
         ZStack {
             Circle()
-                .fill(CurbyGlass.primaryTint.opacity(0.10))
-                .frame(width: 300, height: 300)
-                .blur(radius: 80)
-                .offset(x: -100, y: -200)
+                .fill(CurbyGlass.primaryTint.opacity(0.12))
+                .frame(width: 320, height: 320)
+                .blur(radius: 90)
+                .offset(x: -80, y: -240)
 
             Circle()
-                .fill(CurbyGlass.warningTint.opacity(0.08))
-                .frame(width: 250, height: 250)
+                .fill(CurbyGlass.warningTint.opacity(0.06))
+                .frame(width: 220, height: 220)
                 .blur(radius: 60)
-                .offset(x: 120, y: 300)
+                .offset(x: 140, y: 280)
+
+            Circle()
+                .fill(CurbyGlass.successTint.opacity(0.05))
+                .frame(width: 180, height: 180)
+                .blur(radius: 50)
+                .offset(x: -120, y: 200)
         }
         .ignoresSafeArea()
+    }
+
+    // MARK: - Entrance Animation
+
+    private func runEntrance() {
+        withAnimation(.easeOut(duration: 0.7).delay(0.1)) {
+            showHero = true
+        }
+        withAnimation(.easeOut(duration: 0.6).delay(0.35)) {
+            showPermissions = true
+        }
+        withAnimation(.easeOut(duration: 0.6).delay(0.5)) {
+            showSlider = true
+        }
+        withAnimation(.easeOut(duration: 0.6).delay(0.65)) {
+            showCTA = true
+        }
+        withAnimation(.easeInOut(duration: 2.5).repeatForever(autoreverses: true).delay(0.8)) {
+            pulseGlow = true
+        }
     }
 }
 

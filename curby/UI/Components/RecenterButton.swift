@@ -5,6 +5,7 @@
 //  Animated recenter button with haptic feedback.
 //
 
+import PhosphorSwift
 import SwiftUI
 
 /// A premium-feeling recenter button that appears when the user is in free-explore mode.
@@ -22,9 +23,12 @@ struct RecenterButton: View {
             triggerHaptic()
             action()
         } label: {
-            Image(systemName: "location.fill")
-                .font(.system(size: 20, weight: .semibold))
+            Ph.crosshairSimple.bold
+                .resizable()
+                .aspectRatio(contentMode: .fit)
                 .foregroundStyle(CurbyGlass.primaryTint)
+                .frame(width: 22, height: 22)
+                .frame(width: CurbyConstants.overlayButtonSize, height: CurbyConstants.overlayButtonSize)
                 .glassEffect(.regular.interactive(), in: .circle)
                 .overlay {
                     Circle()
@@ -33,10 +37,6 @@ struct RecenterButton: View {
                 .shadow(color: .black.opacity(0.12), radius: 8, x: 0, y: 4)
                 .shadow(color: CurbyGlass.primaryTint.opacity(0.14), radius: 12, x: 0, y: 6)
                 .scaleEffect(isPressed ? 0.92 : 1.0)
-                .frame(
-                    width: CurbyConstants.overlayButtonSize,
-                    height: CurbyConstants.overlayButtonSize
-                )
         }
         .buttonStyle(.plain)
         .simultaneousGesture(
