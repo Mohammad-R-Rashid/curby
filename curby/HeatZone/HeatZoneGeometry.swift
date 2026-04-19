@@ -263,11 +263,11 @@ enum HeatZoneGeometry {
     static func uiColor(for level: BusyLevel) -> UIColor {
         switch level {
         case .open:
-            return UIColor(red: 0.18, green: 0.72, blue: 0.34, alpha: 1.0)
+            return UIColor(red: 0.32, green: 0.78, blue: 0.52, alpha: 1.0)
         case .busy:
-            return UIColor(red: 1.0, green: 0.48, blue: 0.10, alpha: 1.0)
+            return UIColor(red: 1.0, green: 0.62, blue: 0.28, alpha: 1.0)
         case .veryBusy:
-            return UIColor(red: 0.92, green: 0.22, blue: 0.18, alpha: 1.0)
+            return UIColor(red: 1.0, green: 0.48, blue: 0.42, alpha: 1.0)
         }
     }
 
@@ -278,9 +278,9 @@ enum HeatZoneGeometry {
     /// SwiftUI Color for a busy level.
     static func color(for level: BusyLevel) -> Color {
         switch level {
-        case .open: return Color(red: 0.18, green: 0.72, blue: 0.34)
-        case .busy: return Color(red: 1.0, green: 0.48, blue: 0.10)
-        case .veryBusy: return Color(red: 0.92, green: 0.22, blue: 0.18)
+        case .open: return Color(red: 0.32, green: 0.78, blue: 0.52)
+        case .busy: return Color(red: 1.0, green: 0.62, blue: 0.28)
+        case .veryBusy: return Color(red: 1.0, green: 0.48, blue: 0.42)
         }
     }
 

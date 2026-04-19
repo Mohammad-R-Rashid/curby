@@ -2,7 +2,7 @@
 //  HeatZoneDetailView.swift
 //  curby
 //
-//  In-depth view of a specific heat zone — busy score, street parking, garages.
+//  In-depth view of a specific heat zone — area activity, street parking, garages.
 //
 
 import CoreLocation
@@ -11,7 +11,7 @@ import SwiftUI
 
 /// Detail view for a single heat zone.
 ///
-/// Shows the zone's busy score, street parking openness probabilities,
+/// Shows how busy the zone is, street parking openness probabilities,
 /// and nearby garages/lots with capacity.
 struct HeatZoneDetailView: View {
 
@@ -78,7 +78,7 @@ struct HeatZoneDetailView: View {
     private var headerCard: some View {
         VStack(spacing: 16) {
             HStack(spacing: 16) {
-                // Busy score circle
+                // Area activity ring
                 ZStack {
                     Circle()
                         .strokeBorder(busyColor(zone.busyLevel).opacity(0.3), lineWidth: 4)
@@ -98,7 +98,7 @@ struct HeatZoneDetailView: View {
                             .font(.system(size: 24, weight: .bold, design: .rounded))
                             .foregroundStyle(isDark ? .white : .primary)
 
-                        Text("score")
+                        Text("activity")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(isDark ? .white.opacity(0.4) : .secondary)
                     }
@@ -172,12 +172,12 @@ struct HeatZoneDetailView: View {
                 }
 
                 HStack(spacing: 12) {
-                    if let score = spot.computedScore {
+                    if let openness = spot.computedScore {
                         HStack(spacing: 4) {
-                            Text("\(score)")
+                            Text("\(openness)%")
                                 .font(.system(size: 13, weight: .bold, design: .rounded))
                                 .foregroundStyle(busyColor(spot.computedBusyLevel))
-                            Text("score")
+                            Text("likely open")
                                 .font(.system(size: 12))
                                 .foregroundStyle(isDark ? .white.opacity(0.4) : .secondary)
                         }
@@ -210,8 +210,8 @@ struct HeatZoneDetailView: View {
                         .frame(width: 40, height: 40)
                         .rotationEffect(.degrees(-90))
 
-                    Text("\(score)")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                    Text("\(score)%")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
                         .foregroundStyle(isDark ? .white : .primary)
                 }
             }
@@ -262,12 +262,12 @@ struct HeatZoneDetailView: View {
                     .foregroundStyle(isDark ? .white : .primary)
 
                 HStack(spacing: 12) {
-                    if let score = spot.computedScore {
+                    if let openness = spot.computedScore {
                         HStack(spacing: 4) {
-                            Text("\(score)")
+                            Text("\(openness)%")
                                 .font(.system(size: 13, weight: .bold, design: .rounded))
                                 .foregroundStyle(busyColor(spot.computedBusyLevel))
-                            Text("score")
+                            Text("likely open")
                                 .font(.system(size: 12))
                                 .foregroundStyle(isDark ? .white.opacity(0.4) : .secondary)
                         }
@@ -287,7 +287,7 @@ struct HeatZoneDetailView: View {
 
             Spacer()
 
-            // Garage Score gauge
+            // Openness gauge
             if let score = spot.computedScore {
                 ZStack {
                     Circle()
@@ -300,8 +300,8 @@ struct HeatZoneDetailView: View {
                         .frame(width: 40, height: 40)
                         .rotationEffect(.degrees(-90))
 
-                    Text("\(score)")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                    Text("\(score)%")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
                         .foregroundStyle(isDark ? .white : .primary)
                 }
             }
@@ -353,7 +353,7 @@ struct HeatZoneDetailView: View {
                 name: "West Campus — Core",
                 coordinate: .init(latitude: 30.2849, longitude: -97.7514),
                 radius: 200,
-                busyScore: 76,
+                busyScore: 52,
                 parkingSpots: [
                     ParkingSpot(
                         id: UUID(),

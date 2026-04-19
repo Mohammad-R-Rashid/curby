@@ -1,8 +1,9 @@
 // ============================================================
-// Curby Parking Load Balancer — 5-Factor Scoring Algorithm
+// Curby Parking Load Balancer — 7-Factor Scoring Algorithm
 // ============================================================
 //
-// S(i) = w₁·f_avail + w₂·f_turn + w₃·f_travel + w₄·f_walk + w₅·f_load
+// S(i) = w₁·f_avail + w₂·f_turn + w₃·f_travel + w₄·f_congest +
+//        w₅·f_walk + w₆·f_load + w₇·f_conf
 //
 // NORMALIZATION GUARANTEES:
 //   1. Every factor fⱼ ∈ [0, 1] — enforced by clamp()
@@ -36,19 +37,23 @@ function normalizeWeights(
     raw.availability +
     raw.turnover +
     raw.travelTime +
+    raw.congestion +
     raw.walkDistance +
-    raw.loadBalance;
+    raw.loadBalance +
+    raw.confidence;
 
   // Guard against zero/negative sum
   if (sum <= 0) {
     // Fall back to equal weights
-    const eq = 1 / 5;
+    const eq = 1 / 7;
     return {
       availability: eq,
       turnover: eq,
       travelTime: eq,
+      congestion: eq,
       walkDistance: eq,
       loadBalance: eq,
+      confidence: eq,
     };
   }
 
@@ -56,8 +61,10 @@ function normalizeWeights(
     availability: raw.availability / sum,
     turnover: raw.turnover / sum,
     travelTime: raw.travelTime / sum,
+    congestion: raw.congestion / sum,
     walkDistance: raw.walkDistance / sum,
     loadBalance: raw.loadBalance / sum,
+    confidence: raw.confidence / sum,
   };
 }
 
@@ -96,7 +103,6 @@ function fTurnover(
   windowMin: number,
   parkDurations: number[],
   durationDecayHalfLifeMin: number,
-  capacity: number,
 ): number {
   const n = parkDurations.length;
   if (n === 0) return 0.5; // No data → neutral
@@ -124,7 +130,53 @@ function fTravel(travelMinutes: number, decayMin: number): number {
   return Math.exp(-Math.max(travelMinutes, 0) / decayMin);
 }
 
+// ─── Factor 4: Congestion ───────────────────────────────────
+// Penalizes routes that are slow specifically because of live traffic.
+// Uses segment-level `congestion_numeric` when Directions data is available,
+// otherwise falls back to the Matrix traffic/free-flow ratio.
 
+function fCongestion(
+  congestionNumeric: Array<number | null | undefined>,
+  segmentDistances: Array<number | undefined> = [],
+): number {
+  const samples = congestionNumeric
+    .map((value, idx) => ({
+      value,
+      distance: segmentDistances[idx] ?? 0,
+    }))
+    .filter(
+      (sample): sample is { value: number; distance: number } =>
+        typeof sample.value === 'number' &&
+        sample.value >= 0 &&
+        sample.value <= 100 &&
+        sample.distance > 0,
+    );
+
+  if (samples.length === 0) {
+    return 0.5;
+  }
+
+  const totalDistance = samples.reduce((sum, sample) => sum + sample.distance, 0);
+  if (totalDistance <= 0) {
+    return 0.5;
+  }
+
+  const weightedCongestion =
+    samples.reduce((sum, sample) => sum + sample.value * sample.distance, 0) / totalDistance;
+
+  return clamp(1 - weightedCongestion / 100, 0, 1);
+}
+
+function fCongestionApprox(
+  freeFlowSec?: number,
+  trafficAwareSec?: number,
+): number {
+  if (!freeFlowSec || !trafficAwareSec || trafficAwareSec <= 0) {
+    return 0.5;
+  }
+
+  return clamp(freeFlowSec / trafficAwareSec, 0, 1);
+}
 
 // ─── Factor 5: Walk Distance ────────────────────────────────
 // f_walk = e^(-w / w₀)
@@ -175,6 +227,7 @@ function buildReasoning(
   avail: number,
   turn: number,
   travel: number,
+  congestion: number,
   walk: number,
   load: number,
   conf: number,
@@ -191,6 +244,9 @@ function buildReasoning(
   const tMin = candidate.traffic.travelTimeMin;
   parts.push(`${tMin.toFixed(0)} min drive`);
 
+  if (congestion <= 0.35) parts.push('heavy route traffic');
+  else if (congestion >= 0.75) parts.push('light route traffic');
+
   // Walk
   const wMin = candidate.traffic.walkTimeMin;
   parts.push(`${wMin.toFixed(0)} min walk to destination`);
@@ -203,6 +259,10 @@ function buildReasoning(
 
   // Confidence note
   if (conf < 0.3) parts.push('limited data for this area');
+
+  if (candidate.area.dataSource === 'osm') {
+    parts.push('OSM geometry candidate');
+  }
 
   return parts.join(', ');
 }
@@ -250,12 +310,14 @@ export function scoreAllAreas(
         config.recentDepartureWindowMin,
         c.occupancy.parkDurations,
         durationDecayMin,
-        config.estimatedCapacityPerArea,
       );
 
       // Factors from Mapbox (not dependent on crowdsourced data quality)
       const travel = fTravel(c.traffic.travelTimeMin, config.travelTimeDecayMin);
-
+      const congestion =
+        c.traffic.congestionNumeric && c.traffic.congestionNumeric.length > 0
+          ? fCongestion(c.traffic.congestionNumeric, c.traffic.segmentDistances)
+          : fCongestionApprox(c.traffic.freeFlowSec, c.traffic.trafficAwareSec);
       const walk = fWalk(c.traffic.walkTimeMin, config.walkTimeDecayMin);
       const load = fLoad(activeRouting.get(c.area.id) ?? 0, config.loadPenaltyK);
       const conf = fConfidence(c.occupancy.recentUniqueUsers, config.confidenceMinUsers);
@@ -274,8 +336,10 @@ export function scoreAllAreas(
         weights.availability * avail +
         weights.turnover * turn +
         weights.travelTime * travel +
+        weights.congestion * congestion +
         weights.walkDistance * walk +
-        weights.loadBalance * load;
+        weights.loadBalance * load +
+        weights.confidence * conf;
 
       return {
         areaId: c.area.id,
@@ -284,11 +348,12 @@ export function scoreAllAreas(
           availability: avail,
           turnover: turn,
           travelTime: travel,
+          congestion,
           walkDistance: walk,
           loadBalance: load,
           confidence: conf,
         },
-        reasoning: buildReasoning(avail, turn, travel, walk, load, conf, c),
+        reasoning: buildReasoning(avail, turn, travel, congestion, walk, load, conf, c),
       };
     })
     // DETERMINISTIC SORT: by score descending, then by areaId ascending (tiebreaker)

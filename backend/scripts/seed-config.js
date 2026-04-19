@@ -8,7 +8,7 @@
 // that you can then paste into the KV dashboard.
 
 const DEFAULT_CONFIG = {
-  version: 1,
+  version: 4,
 
   detection: {
     parkDetectionDurationSec: 120,
@@ -20,12 +20,12 @@ const DEFAULT_CONFIG = {
 
   algorithm: {
     weights: {
-      availability: 0.30,
+      availability: 0.28,
       turnover: 0.10,
-      travelTime: 0.20,
-      congestion: 0.10,
-      walkDistance: 0.15,
-      loadBalance: 0.10,
+      travelTime: 0.24,
+      congestion: 0.18,
+      walkDistance: 0.10,
+      loadBalance: 0.05,
       confidence: 0.05,
     },
     estimatedCapacityPerArea: 50,
@@ -44,6 +44,9 @@ const DEFAULT_CONFIG = {
     maxRadiusMeters: 5000,
     maxCandidates: 9,
     occupancyRadiusMeters: 200,
+    osmCompanionSearch: true,
+    overpassInterpreterUrl: 'https://overpass-api.de/api/interpreter',
+    osmFetchTimeoutMs: 1500,
   },
 
   telemetry: {

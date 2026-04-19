@@ -5,40 +5,55 @@
 //  Apple Maps-style root view: full-screen map + draggable bottom sheet.
 //
 
+import CoreLocation
 import MapboxMaps
 import MapKit
 import PhosphorSwift
 import SwiftUI
+import UIKit
 
 /// Root container post-onboarding.
 ///
-/// Full-screen Mapbox map with block-shaped heat zone overlays,
-/// parking markers on zone selection, and an always-visible
+/// Full-screen Mapbox map with live parking POIs,
+/// backend-routed recommendations, and an always-visible
 /// draggable bottom sheet (Apple Maps style).
 struct MainNavigationView: View {
 
     // MARK: - Dependencies
 
     @State private var locationService = LocationService()
+    @State private var remoteConfigService: RemoteConfigService
     @State private var motionStateManager: MotionStateManager
     @State private var cameraController: CameraController
-    @State private var heatZoneManager = HeatZoneManager()
+    @State private var parkingAreaManager = ParkingAreaManager()
+    @State private var telemetryUploader: TelemetryUploader
+    @State private var parkingEventDetector: ParkingEventDetector
+    @State private var parkingWebSocketManager: ParkingWebSocketManager
     @State private var searchState = SearchState()
 
     // MARK: - Sheet State
 
     @State private var sheetDetent: PresentationDetent = .fraction(0.30)
-    @State private var selectedZone: HeatZone?
+    @State private var selectedParkingArea: LiveParkingArea?
+    /// User-confirmed park (Supabase `active_parks`); tap the map pin to confirm removal.
+    @State private var savedParkPin: SavedParkPinState?
+    @State private var showRemoveParkedConfirm = false
+    @State private var walkingGeofenceMeters = OnboardingState.storedWalkingDistanceMeters
+    @State private var geofenceRefreshTask: Task<Void, Never>?
     @State private var hasSetInitialViewport = false
-    @State private var currentMapZoom = CurbyConstants.zoomDefault
-    /// Snaps to tier boundaries so map style layers only re-diff when the display meaningfully changes.
-    @State private var renderZoom = CurbyConstants.zoomDefault
-    @State private var selectedBuilding: StandardBuildingsFeature?
-    @State private var selectedStructureSurfaceID: UUID?
-    @State private var hasLoadedMap = false
-    @State private var isParkingRoadQueryInFlight = false
-    @State private var isParkingStructureQueryInFlight = false
     @State private var showSettings = false
+    @State private var developerModeEnabled = OnboardingState.storedDeveloperModeEnabled
+
+    // MARK: - Zone State
+
+    @State private var heatZoneManager = HeatZoneManager()
+    @State private var currentMapZoom: Double = CurbyConstants.zoomDefault
+
+    // MARK: - Dropped Pin State
+
+    @State private var customPinCoordinate: CLLocationCoordinate2D?
+    @State private var isDraggingPin = false
+    @State private var pinDragStart: CLLocationCoordinate2D?
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -46,12 +61,33 @@ struct MainNavigationView: View {
 
     init() {
         let location = LocationService()
-        let motion = MotionStateManager(locationService: location)
+        let apiClient = CurbyAPIClient()
+        let remoteConfig = RemoteConfigService(apiClient: apiClient)
+        let motion = MotionStateManager(
+            locationService: location,
+            remoteConfigService: remoteConfig
+        )
         let camera = CameraController(locationService: location, motionStateManager: motion)
+        let telemetryUploader = TelemetryUploader(
+            apiClient: apiClient,
+            remoteConfigService: remoteConfig
+        )
+        let parkingEventDetector = ParkingEventDetector(
+            apiClient: apiClient,
+            remoteConfigService: remoteConfig
+        )
+        let parkingWebSocketManager = ParkingWebSocketManager(
+            apiClient: apiClient,
+            remoteConfigService: remoteConfig
+        )
 
         _locationService = State(initialValue: location)
+        _remoteConfigService = State(initialValue: remoteConfig)
         _motionStateManager = State(initialValue: motion)
         _cameraController = State(initialValue: camera)
+        _telemetryUploader = State(initialValue: telemetryUploader)
+        _parkingEventDetector = State(initialValue: parkingEventDetector)
+        _parkingWebSocketManager = State(initialValue: parkingWebSocketManager)
     }
 
     // MARK: - Body
@@ -76,6 +112,22 @@ struct MainNavigationView: View {
 
             // MARK: Map overlay controls
             overlayControls
+
+            if developerModeEnabled {
+                DeveloperMapDiagnosticsOverlay(
+                    mapZoom: currentMapZoom,
+                    searchState: searchState,
+                    parkingAreaManager: parkingAreaManager,
+                    parkingWebSocketManager: parkingWebSocketManager,
+                    remoteConfigService: remoteConfigService,
+                    heatZoneManager: heatZoneManager,
+                    telemetryUploader: telemetryUploader,
+                    parkingEventDetector: parkingEventDetector,
+                    locationService: locationService,
+                    motionStateManager: motionStateManager,
+                    walkingGeofenceMeters: walkingGeofenceMeters
+                )
+            }
         }
         .sheet(isPresented: .constant(true)) {
             sheetContent
@@ -95,6 +147,28 @@ struct MainNavigationView: View {
             locationService.requestPermission()
             setupInitialViewport()
             searchState.userLocation = locationService.currentLocation?.coordinate
+            remoteConfigService.start()
+            telemetryUploader.start()
+            parkingEventDetector.start()
+            parkingWebSocketManager.updateCurrentLocation(locationService.currentLocation?.coordinate)
+            telemetryUploader.updateLatestSample(
+                location: locationService.currentLocation,
+                heading: locationService.currentHeading
+            )
+            parkingEventDetector.updateLatestLocation(locationService.currentLocation)
+            parkingEventDetector.onParked = {
+                CurbyHaptics.medium()
+                Task { await parkingWebSocketManager.markArrivedIfNeeded() }
+                syncSavedParkPinFromDetector()
+            }
+            syncSavedParkPinFromDetector()
+        }
+        .onChange(of: parkingEventDetector.presenceState) { _, new in
+            if new == .driving {
+                savedParkPin = nil
+            } else if new == .parked {
+                syncSavedParkPinFromDetector()
+            }
         }
         .onChange(of: locationService.authorizationStatus) { _, newStatus in
             handleAuthorizationChange(newStatus)
@@ -102,13 +176,64 @@ struct MainNavigationView: View {
         .onChange(of: locationService.currentSpeed) { _, _ in
             cameraController.updateForCurrentSpeed()
         }
+        .onChange(of: locationService.currentHeading) { _, newHeading in
+            telemetryUploader.updateLatestSample(
+                location: locationService.currentLocation,
+                heading: newHeading
+            )
+        }
         .onChange(of: locationService.currentLocation) { _, newLoc in
             searchState.userLocation = newLoc?.coordinate
+            telemetryUploader.updateLatestSample(location: newLoc, heading: locationService.currentHeading)
+            parkingEventDetector.updateLatestLocation(newLoc)
+            parkingWebSocketManager.updateCurrentLocation(newLoc?.coordinate)
+        }
+        .onChange(of: parkingWebSocketManager.activeSessionID) { _, _ in
+            guard let recommendation = parkingWebSocketManager.activeRecommendation else {
+                return
+            }
+            focusRecommendation(recommendation)
+        }
+        .onChange(of: parkingAreaManager.areas.map(\.id)) { _, newIDs in
+            guard let selectedParkingArea else { return }
+            if
+                !newIDs.contains(selectedParkingArea.id),
+                parkingWebSocketManager.activeRecommendation?.area.id != selectedParkingArea.id
+            {
+                self.selectedParkingArea = nil
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: OnboardingState.preferencesDidChangeNotification)) { _ in
+            developerModeEnabled = OnboardingState.storedDeveloperModeEnabled
+            let updatedGeofenceMeters = OnboardingState.storedWalkingDistanceMeters
+            guard abs(updatedGeofenceMeters - walkingGeofenceMeters) > 1 else { return }
+            walkingGeofenceMeters = updatedGeofenceMeters
+            geofenceRefreshTask?.cancel()
+            geofenceRefreshTask = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(350))
+                guard !Task.isCancelled else { return }
+                refreshParkingExperienceForCurrentDestination(retryBackend: true)
+            }
         }
         .animation(
             .easeInOut(duration: CurbyConstants.uiFadeAnimationDuration),
             value: cameraController.showRecenterButton
         )
+        .confirmationDialog(
+            "Remove parked location?",
+            isPresented: $showRemoveParkedConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Remove", role: .destructive) {
+                CurbyHaptics.medium()
+                Task { await clearSavedParkPinIfPresent() }
+            }
+            Button("Cancel", role: .cancel) {
+                CurbyHaptics.light()
+            }
+        } message: {
+            Text("Clears your spot from the live map.")
+        }
     }
 
     // MARK: - Map View
@@ -120,83 +245,145 @@ struct MainNavigationView: View {
                 // User location puck
                 Puck2D(bearing: .heading)
 
-                if !heatZoneManager.heatZones.isEmpty {
-                    ParkingZoneMapStyleContent(
-                        zones: heatZoneManager.heatZones,
-                        selectedZoneID: selectedZone?.id,
-                        zoom: renderZoom
+                // Geo-fenced busy/open zones — rendered at all zoom levels
+                ParkingZoneMapStyleContent(
+                    zones: heatZoneManager.heatZones,
+                    selectedZoneID: nil,
+                    zoom: currentMapZoom
+                )
+
+                if developerModeEnabled {
+                    DeveloperDebugMapStyleContent(
+                        userLocation: locationService.currentLocation,
+                        destinationCoordinate: searchState.selectedDestination?.coordinate,
+                        parkingAreas: parkingAreaManager.areas,
+                        activeRecommendation: parkingWebSocketManager.activeRecommendation,
+                        socketOriginCoordinate: parkingWebSocketManager.debugSocketOriginCoordinate
                     )
+                }
 
-                    if renderZoom < CurbyConstants.parkingBadgeCutoffZoom {
-                        // Zone badges remain at overview zooms, then yield to street/building geometry.
-                        ForEvery(heatZoneManager.heatZones) { zone in
-                            MapViewAnnotation(coordinate: zone.coordinate) {
-                                HeatZoneBadge(zone: zone)
-                                    .onTapGesture {
-                                        selectZone(zone)
-                                    }
+                CurbyLiveParkingMapStyleContent(
+                    destinationCoordinate: searchState.selectedDestination?.coordinate,
+                    walkingGeofenceRadiusMeters: walkingGeofenceMeters,
+                    activeRecommendation: parkingWebSocketManager.activeRecommendation,
+                    pendingRecommendation: parkingWebSocketManager.pendingRouteUpdate,
+                    developerMode: developerModeEnabled
+                )
+
+                if let destination = searchState.selectedDestination {
+                    MapViewAnnotation(coordinate: destination.coordinate) {
+                        DestinationMapPin(name: destination.name)
+                            .onTapGesture {
+                                cameraController.navigateToDestination(destination.coordinate, zoom: 16.0)
                             }
-                            .allowOverlap(true)
+                    }
+                    .allowOverlap(true)
+                    .priority(5)
+                }
+
+                if let recommendation = parkingWebSocketManager.activeRecommendation {
+                    MapViewAnnotation(coordinate: recommendation.area.coordinate) {
+                        RecommendationMapPin(
+                            recommendation: recommendation,
+                            isArrived: parkingWebSocketManager.status == .arrived,
+                            developerMode: developerModeEnabled
+                        )
+                        .onTapGesture {
+                            focusRecommendation(recommendation)
                         }
                     }
+                    .allowZElevate(true)
+                    .allowOverlap(true)
+                    .priority(9)
+                }
 
-                    if renderZoom >= CurbyConstants.parkingStructureDetailZoom {
-                        ForEvery(structurePinItems) { item in
-                            MapViewAnnotation(coordinate: item.coordinate) {
-                                StructureParkingPin(
-                                    item: item,
-                                    isSelected: item.id == selectedStructureSurfaceID
+                ForEvery(visibleParkingAreas) { area in
+                    MapViewAnnotation(coordinate: area.coordinate) {
+                        LiveParkingAreaMapPin(
+                            area: area,
+                            isSelected: selectedParkingArea?.id == area.id,
+                            developerLabels: developerModeEnabled
+                        )
+                        .onTapGesture {
+                            selectParkingArea(area)
+                        }
+                    }
+                    .allowZElevate(true)
+                    .allowOverlap(true)
+                    .priority(selectedParkingArea?.id == area.id ? 7 : (area.kind == .street ? 5 : 4))
+                }
+
+                if developerModeEnabled {
+                    ForEvery(parkingAreaManager.areas.filter { area in
+                        navigationCoordinateDiffers(from: area)
+                    }) { area in
+                        MapViewAnnotation(coordinate: area.navigationCoordinate) {
+                            NavigationAnchorMapPin(areaName: area.mapLabel)
+                        }
+                        .allowZElevate(true)
+                        .allowOverlap(true)
+                        .priority(6)
+                    }
+
+                    if let wsOrigin = parkingWebSocketManager.debugSocketOriginCoordinate {
+                        MapViewAnnotation(coordinate: wsOrigin) {
+                            WebSocketOriginMapPin()
+                        }
+                        .allowZElevate(true)
+                        .allowOverlap(true)
+                        .priority(8)
+                    }
+                }
+
+                if let pin = savedParkPin {
+                    MapViewAnnotation(coordinate: pin.coordinate) {
+                        SavedParkMapPin(title: pin.title)
+                            .onTapGesture {
+                                showRemoveParkedConfirm = true
+                            }
+                    }
+                    .allowZElevate(true)
+                    .allowOverlap(true)
+                    .priority(10)
+                }
+
+                // Long press drops a draggable pin when no destination is active
+                if searchState.selectedDestination == nil {
+                    LongPressInteraction { context in
+                        dropCustomPin(at: context.coordinate)
+                        return false
+                    }
+                }
+
+                // Dropped pin annotation
+                if let coord = customPinCoordinate, searchState.selectedDestination == nil {
+                    MapViewAnnotation(coordinate: coord) {
+                        DroppedPinView(
+                            isDragging: $isDraggingPin,
+                            onDragChanged: { translation in
+                                if pinDragStart == nil { pinDragStart = customPinCoordinate }
+                                guard let start = pinDragStart else { return }
+                                customPinCoordinate = coordinateByDragging(
+                                    from: start,
+                                    translation: translation,
+                                    zoom: currentMapZoom
                                 )
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    handleStructurePinTap(item)
-                                }
+                            },
+                            onDragEnded: {
+                                pinDragStart = nil
+                            },
+                            onTap: {
+                                setCustomPinAsDestination()
                             }
-                            .allowZElevate(true)
-                            .allowOverlap(true)
-                            .priority(item.id == selectedStructureSurfaceID ? 8 : 3)
-                        }
+                        )
                     }
-                }
-
-                if renderZoom >= CurbyConstants.parkingStructureDetailZoom,
-                   let selectedBuilding
-                {
-                    FeatureState(selectedBuilding, .init(select: true))
-                }
-
-                if renderZoom >= CurbyConstants.parkingStructureDetailZoom {
-                    TapInteraction(.standardBuildings) { building, _ in
-                        selectedBuilding = building
-                        selectedStructureSurfaceID = nil
-                        return true
-                    }
-                }
-
-                TapInteraction(.layer(ParkingZoneLayerIDs.overviewHitLayer), radius: 8) { feature, _ in
-                    selectZoneForSurfaceFeature(feature)
-                    return true
-                }
-
-                TapInteraction(.layer(ParkingZoneLayerIDs.streetHitLayer), radius: 8) { feature, _ in
-                    selectZoneForSurfaceFeature(feature)
-                    return true
-                }
-
-                TapInteraction(.layer(ParkingZoneLayerIDs.garageHitLayer), radius: 8) { feature, _ in
-                    selectStructureForSurfaceFeature(feature)
-                    return true
-                }
-
-                TapInteraction(.layer(ParkingZoneLayerIDs.lotHitLayer), radius: 8) { feature, _ in
-                    selectStructureForSurfaceFeature(feature)
-                    return true
+                    .allowOverlap(true)
+                    .priority(11)
                 }
 
                 TapInteraction { _ in
-                    if currentMapZoom >= CurbyConstants.parkingStructureDetailZoom {
-                        selectedBuilding = nil
-                        selectedStructureSurfaceID = nil
+                    if selectedParkingArea != nil {
+                        selectedParkingArea = nil
                     }
                     return false
                 }
@@ -212,227 +399,153 @@ struct MainNavigationView: View {
                     value: true
                 )
             }
-            .onMapLoaded { _ in
-                hasLoadedMap = true
-                requestParkingSurfaceAlignmentIfNeeded(using: proxy)
-            }
-            .onMapIdle { _ in
-                // Ensures we query roads only after vector tiles finish streaming in.
-                requestParkingSurfaceAlignmentIfNeeded(using: proxy)
-            }
-            .onCameraChanged { event in
-                let zoom = event.cameraState.zoom
-                currentMapZoom = zoom
-
-                if renderZoomTier(zoom) != renderZoomTier(renderZoom) {
-                    renderZoom = zoom
-                }
-
-                if zoom < CurbyConstants.parkingStructureDetailZoom {
-                    if selectedBuilding != nil { selectedBuilding = nil }
-                    if selectedStructureSurfaceID != nil { selectedStructureSurfaceID = nil }
-                }
-
-                requestParkingSurfaceAlignmentIfNeeded(using: proxy)
-            }
-            .onChange(of: heatZoneManager.heatZones.map(\.id)) { _, _ in
-                selectedStructureSurfaceID = nil
-                scheduleParkingSurfaceAlignmentIfNeeded(
-                    using: proxy,
-                    delayMilliseconds: 250
-                )
+            .onCameraChanged { change in
+                currentMapZoom = change.cameraState.zoom
+                alignZonesIfNeeded(proxy: proxy, zoom: change.cameraState.zoom)
             }
         }
     }
 
-    // MARK: - Zone Selection
+    // MARK: - Zone Alignment
 
-    private func selectZone(_ zone: HeatZone) {
-        withAnimation(.spring(response: 0.3)) {
-            selectedZone = zone
-            sheetDetent = .medium
-        }
-        selectedBuilding = nil
-        selectedStructureSurfaceID = nil
-        cameraController.navigateToDestination(zone.coordinate, zoom: 17.0)
-    }
+    private func alignZonesIfNeeded(proxy: MapboxMaps.MapProxy, zoom: Double) {
+        guard let map = proxy.map else { return }
 
-    private func selectZoneForSurfaceFeature(_ feature: FeaturesetFeature) {
-        guard
-            let zoneIDString = feature.properties["zone_id"]??.string,
-            let zoneID = UUID(uuidString: zoneIDString),
-            let zone = heatZoneManager.heatZones.first(where: { $0.id == zoneID })
-        else {
-            return
-        }
-
-        selectZone(zone)
-    }
-
-    private func handleStructurePinTap(_ item: StructurePinItem) {
-        if selectedStructureSurfaceID == item.id {
-            selectZoneForStructurePin(item)
-            return
-        }
-
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
-            selectedStructureSurfaceID = item.id
-            selectedBuilding = nil
-        }
-    }
-
-    private func selectStructureForSurfaceFeature(_ feature: FeaturesetFeature) {
-        guard
-            let surfaceIDString = feature.properties["surface_id"]??.string,
-            let surfaceID = UUID(uuidString: surfaceIDString)
-        else {
-            return
-        }
-
-        if
-            selectedStructureSurfaceID == surfaceID,
-            let item = structurePinItems.first(where: { $0.id == surfaceID })
+        if heatZoneManager.needsStreetSurfaceAlignment,
+           zoom >= CurbyConstants.parkingStreetDetailZoom
         {
-            selectZoneForStructurePin(item)
-            return
-        }
-
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
-            selectedStructureSurfaceID = surfaceID
-            selectedBuilding = nil
-        }
-    }
-
-    private func selectZoneForStructurePin(_ item: StructurePinItem) {
-        guard let zone = heatZoneManager.heatZones.first(where: { $0.id == item.zoneID }) else {
-            return
-        }
-
-        selectZone(zone)
-    }
-
-    private func renderZoomTier(_ zoom: Double) -> Int {
-        if zoom >= CurbyConstants.parkingStructureDetailZoom { return 3 }
-        if zoom >= CurbyConstants.parkingBadgeCutoffZoom { return 2 }
-        if zoom >= CurbyConstants.parkingStreetDetailZoom { return 1 }
-        return 0
-    }
-
-    private var structurePinItems: [StructurePinItem] {
-        let visibleZones: [HeatZone]
-        if let selectedZoneID = selectedZone?.id {
-            visibleZones = heatZoneManager.heatZones.filter { $0.id == selectedZoneID }
-        } else {
-            visibleZones = heatZoneManager.heatZones
-        }
-
-        return visibleZones.flatMap { zone in
-            let spotsByReference = Dictionary(
-                uniqueKeysWithValues: zone.parkingSpots.map { ($0.id.uuidString, $0) }
+            let opts = SourceQueryOptions(
+                sourceLayerIds: [ParkingRoadNetworkIDs.roadSourceLayer],
+                filter: Exp(.all)
             )
-
-            return zone.visibleSurfaces(at: renderZoom)
-                .filter(\.kind.isStructureLevel)
-                .compactMap { (surface: ParkingSurface) -> StructurePinItem? in
-                    guard let coordinate = HeatZoneGeometry.surfaceAnchor(of: surface.polygonCoords) else {
-                        return nil
-                    }
-
-                    let spot = surface.sourceReference.flatMap { spotsByReference[$0] }
-                    return StructurePinItem(
-                        zoneID: zone.id,
-                        coordinate: coordinate,
-                        surface: surface,
-                        spot: spot
+            _ = try? map.querySourceFeatures(
+                for: ParkingRoadNetworkIDs.source,
+                options: opts
+            ) { result in
+                guard let features = try? result.get(), !features.isEmpty else { return }
+                Task { @MainActor in
+                    heatZoneManager.alignStreetSurfaces(
+                        to: ParkingRoadAlignment.roadFeatures(from: features)
                     )
                 }
-        }
-    }
-
-    private func scheduleParkingSurfaceAlignmentIfNeeded(
-        using proxy: MapboxMaps.MapProxy,
-        delayMilliseconds: UInt64
-    ) {
-        Task { @MainActor in
-            if delayMilliseconds > 0 {
-                try? await Task.sleep(for: .milliseconds(delayMilliseconds))
             }
+        }
 
-            requestParkingSurfaceAlignmentIfNeeded(using: proxy)
+        if heatZoneManager.needsStructureSurfaceAlignment,
+           zoom >= CurbyConstants.parkingStructureDetailZoom
+        {
+            let opts = SourceQueryOptions(
+                sourceLayerIds: [ParkingRoadNetworkIDs.buildingSourceLayer],
+                filter: Exp(.all)
+            )
+            _ = try? map.querySourceFeatures(
+                for: ParkingRoadNetworkIDs.source,
+                options: opts
+            ) { result in
+                guard let features = try? result.get(), !features.isEmpty else { return }
+                Task { @MainActor in
+                    heatZoneManager.alignStructureSurfaces(
+                        to: ParkingStructureAlignment.buildingFeatures(from: features)
+                    )
+                }
+            }
         }
     }
 
-    private func requestParkingSurfaceAlignmentIfNeeded(using proxy: MapboxMaps.MapProxy) {
-        guard heatZoneManager.needsStreetSurfaceAlignment || heatZoneManager.needsStructureSurfaceAlignment else {
-            return
-        }
-        requestStreetSurfaceAlignmentIfNeeded(using: proxy)
-        requestStructureSurfaceAlignmentIfNeeded(using: proxy)
+    // MARK: - Dropped Pin
+
+    private func dropCustomPin(at coordinate: CLLocationCoordinate2D) {
+        customPinCoordinate = coordinate
+        CurbyHaptics.heavy()
     }
 
-    private func requestStreetSurfaceAlignmentIfNeeded(using proxy: MapboxMaps.MapProxy) {
-        guard
-            hasLoadedMap,
-            !isParkingRoadQueryInFlight,
-            currentMapZoom >= CurbyConstants.parkingStreetDetailZoom,
-            heatZoneManager.needsStreetSurfaceAlignment,
-            let map = proxy.map,
-            map.allSourceIdentifiers.contains(where: { $0.id == ParkingRoadNetworkIDs.source })
-        else {
-            return
+    private func setCustomPinAsDestination() {
+        guard let coord = customPinCoordinate else { return }
+        CurbyHaptics.notify(.success)
+        searchState.selectDestination(
+            name: "Custom Location",
+            subtitle: "Dropped pin",
+            coordinate: coord
+        )
+        customPinCoordinate = nil
+    }
+
+    /// Converts a 2D screen drag translation to a new coordinate, accounting for map zoom scale.
+    private func coordinateByDragging(
+        from start: CLLocationCoordinate2D,
+        translation: CGSize,
+        zoom: Double
+    ) -> CLLocationCoordinate2D {
+        let metersPerPixel = 156543.03392 * cos(start.latitude * .pi / 180.0) / pow(2.0, zoom)
+        return HeatZoneGeometry.offsetCoordinate(
+            from: start,
+            northMeters: -Double(translation.height) * metersPerPixel,
+            eastMeters: Double(translation.width) * metersPerPixel
+        )
+    }
+
+    // MARK: - Area Selection
+
+    private func selectParkingArea(_ area: LiveParkingArea) {
+        CurbyHaptics.selection()
+        withAnimation(.spring(response: 0.3)) {
+            selectedParkingArea = area
+            sheetDetent = .medium
         }
+        cameraController.navigateToDestination(
+            area.coordinate,
+            zoom: area.kind == .street ? 17.1 : 16.4
+        )
+    }
 
-        isParkingRoadQueryInFlight = true
+    private func focusRecommendation(_ recommendation: CurbyParkingRecommendation) {
+        CurbyHaptics.selection()
+        selectedParkingArea = parkingAreaManager.areas.first(where: { $0.id == recommendation.area.id }) ??
+            LiveParkingArea(
+                id: recommendation.area.id,
+                name: recommendation.area.name,
+                coordinate: recommendation.area.coordinate,
+                navigationCoordinate: recommendation.area.coordinate,
+                address: "",
+                fullAddress: "",
+                placeFormatted: "",
+                phone: nil,
+                website: nil,
+                openHoursText: [],
+                categoryIDs: [recommendation.area.category],
+                distanceMeters: nil,
+                destinationDistanceMeters: nil,
+                kind: LiveParkingArea.kind(
+                    forName: recommendation.area.name,
+                    categoryIDs: [recommendation.area.category]
+                )
+            )
+        cameraController.navigateToDestination(recommendation.area.coordinate, zoom: 16.0)
+    }
 
-        let options = SourceQueryOptions(
-            sourceLayerIds: [ParkingRoadNetworkIDs.roadSourceLayer],
-            filter: ["all"]
+    private var visibleParkingAreas: [LiveParkingArea] {
+        parkingAreaManager.areas.filter { area in
+            parkingWebSocketManager.activeRecommendation?.area.id != area.id
+        }
+    }
+
+    private func refreshParkingExperienceForCurrentDestination(retryBackend: Bool) {
+        guard let destination = searchState.selectedDestination else { return }
+
+        parkingAreaManager.loadAreas(
+            around: destination.coordinate,
+            userLocation: locationService.currentLocation?.coordinate,
+            walkingRadiusMeters: walkingGeofenceMeters
         )
 
-        map.querySourceFeatures(for: ParkingRoadNetworkIDs.source, options: options) { result in
-            Task { @MainActor in
-                isParkingRoadQueryInFlight = false
+        guard retryBackend else { return }
 
-                guard case let .success(features) = result else {
-                    return
-                }
-
-                let roads = ParkingRoadAlignment.roadFeatures(from: features)
-                heatZoneManager.alignStreetSurfaces(to: roads)
-            }
-        }
-    }
-
-    private func requestStructureSurfaceAlignmentIfNeeded(using proxy: MapboxMaps.MapProxy) {
-        guard
-            hasLoadedMap,
-            !isParkingStructureQueryInFlight,
-            currentMapZoom >= CurbyConstants.parkingStructureDetailZoom,
-            heatZoneManager.needsStructureSurfaceAlignment,
-            let map = proxy.map,
-            map.allSourceIdentifiers.contains(where: { $0.id == ParkingRoadNetworkIDs.source })
-        else {
-            return
-        }
-
-        isParkingStructureQueryInFlight = true
-
-        let options = SourceQueryOptions(
-            sourceLayerIds: [ParkingRoadNetworkIDs.buildingSourceLayer],
-            filter: ["all"]
-        )
-
-        map.querySourceFeatures(for: ParkingRoadNetworkIDs.source, options: options) { result in
-            Task { @MainActor in
-                isParkingStructureQueryInFlight = false
-
-                guard case let .success(features) = result else {
-                    return
-                }
-
-                let buildings = ParkingStructureAlignment.buildingFeatures(from: features)
-                heatZoneManager.alignStructureSurfaces(to: buildings)
-            }
+        Task {
+            await parkingWebSocketManager.findParking(
+                for: destination,
+                currentLocation: locationService.currentLocation?.coordinate,
+                searchRadiusMeters: walkingGeofenceMeters
+            )
         }
     }
 
@@ -462,6 +575,7 @@ struct MainNavigationView: View {
 
     private var settingsButton: some View {
         Button {
+            CurbyHaptics.light()
             showSettings = true
         } label: {
             Ph.gearSix.fill
@@ -481,30 +595,38 @@ struct MainNavigationView: View {
     // MARK: - Recenter (sheet — moves with bottom panel)
 
     private var sheetRecenterButton: some View {
-        sheetBarIconButton(
-            icon: .crosshairSimple,
-            tint: CurbyGlass.primaryTint,
-            accessibilityLabel: "Recenter map on your location"
-        ) {
+        Button {
+            CurbyHaptics.light()
             cameraController.recenter()
+        } label: {
+            Image(systemName: "location.circle.fill")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(CurbyGlass.primaryTint)
+                .frame(width: 32, height: 32)
+                .contentShape(.circle)
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Recenter map on your location")
     }
 
     // MARK: - Sheet Content (Contextual)
 
     @ViewBuilder
     private var sheetContent: some View {
-        if let zone = selectedZone {
-            // ZONE DETAIL MODE
+        if let selectedParkingArea {
             VStack(spacing: 0) {
-                // Back bar
                 GlassEffectContainer(spacing: CurbyGlass.chromeSpacing) {
                     HStack {
                         Button {
+                            CurbyHaptics.light()
                             withAnimation {
-                                selectedZone = nil
-                                selectedStructureSurfaceID = nil
-                                if let dest = searchState.selectedDestination {
+                                self.selectedParkingArea = nil
+                                if let recommendation = parkingWebSocketManager.activeRecommendation {
+                                    cameraController.navigateToDestination(
+                                        recommendation.area.coordinate,
+                                        zoom: 16.0
+                                    )
+                                } else if let dest = searchState.selectedDestination {
                                     cameraController.navigateToDestination(dest.coordinate)
                                 }
                             }
@@ -514,7 +636,7 @@ struct MainNavigationView: View {
                                     .resizable()
                                     .aspectRatio(contentMode: .fit)
                                     .frame(width: 13, height: 13)
-                                Text("Zones")
+                                Text("Parking")
                                     .font(.system(size: 15, weight: .medium))
                             }
                             .foregroundStyle(CurbyGlass.primaryTint)
@@ -522,75 +644,162 @@ struct MainNavigationView: View {
 
                         Spacer()
 
-                        if cameraController.showRecenterButton {
-                            sheetRecenterButton
-                        }
-
-                        // Navigate button in detail
-                        if let dest = searchState.selectedDestination {
-                            Button {
-                                openInMaps(coordinate: dest.coordinate, name: dest.name)
-                            } label: {
-                                HStack(spacing: 6) {
-                                    Ph.navigationArrow.fill
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .frame(width: 14, height: 14)
-                                    Text("Navigate")
-                                        .font(.system(size: 13, weight: .semibold))
-                                }
-                                .frame(minWidth: 96)
-                            }
-                            .buttonStyle(.glassProminent)
-                            .tint(CurbyGlass.primaryTint)
-                        }
+                        sheetRecenterButton
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
                     .curbyGlassSurface(cornerRadius: CurbyGlass.barCornerRadius)
                 }
                 .padding(.horizontal, 20)
-                // Breathing room under the sheet grabber (system drag indicator).
                 .padding(.top, 20)
                 .padding(.bottom, 8)
 
-                HeatZoneDetailView(
-                    zone: zone
+                ParkingAreaDetailView(
+                    area: selectedParkingArea,
+                    recommendation: parkingWebSocketManager.activeRecommendation?.area.id == selectedParkingArea.id
+                        ? parkingWebSocketManager.activeRecommendation
+                        : nil,
+                    isParkedHere: isParkedAtSelectedParkingArea,
+                    onNavigate: {
+                        openInMaps(
+                            coordinate: selectedParkingArea.navigationCoordinate,
+                            name: selectedParkingArea.name
+                        )
+                    },
+                    onMarkAsParked: {
+                        Task { await saveParkPin(for: selectedParkingArea) }
+                    }
                 )
             }
         } else {
             // SEARCH / DESTINATION MODE
             SearchView(
                 searchState: searchState,
-                heatZoneManager: heatZoneManager,
+                parkingAreaManager: parkingAreaManager,
+                parkingSearchManager: parkingWebSocketManager,
+                parkingEventDetector: parkingEventDetector,
                 showRecenterButton: cameraController.showRecenterButton,
                 onRecenter: { cameraController.recenter() },
+                onMarkAsParked: {
+                    Task { await saveParkPinFromDestinationSheet() }
+                },
                 onDestinationSelected: { dest in
-                    heatZoneManager.loadZones(
+                    customPinCoordinate = nil
+                    selectedParkingArea = nil
+                    parkingAreaManager.loadAreas(
                         around: dest.coordinate,
-                        destinationName: dest.name
+                        userLocation: locationService.currentLocation?.coordinate,
+                        walkingRadiusMeters: walkingGeofenceMeters
                     )
+                    heatZoneManager.loadZones(around: dest.coordinate, destinationName: dest.name, radiusMeters: walkingGeofenceMeters)
                     cameraController.navigateToDestination(dest.coordinate)
                     sheetDetent = .fraction(0.25)
+                    Task {
+                        await parkingWebSocketManager.findParking(
+                            for: dest,
+                            currentLocation: locationService.currentLocation?.coordinate,
+                            searchRadiusMeters: walkingGeofenceMeters
+                        )
+                    }
                 },
-                onZoneSelected: { zone in
-                    selectZone(zone)
+                onParkingAreaSelected: { area in
+                    selectParkingArea(area)
                 },
                 onClearDestination: {
+                    CurbyHaptics.light()
+                    Task { await parkingWebSocketManager.cancelSearch() }
+                    parkingAreaManager.clear()
                     heatZoneManager.clearZones()
-                    selectedZone = nil
-                    selectedStructureSurfaceID = nil
-                    selectedBuilding = nil
+                    customPinCoordinate = nil
+                    selectedParkingArea = nil
                     cameraController.recenter()
                     sheetDetent = .fraction(0.30)
+                },
+                onExpandWalkingRadius: {
+                    CurbyHaptics.medium()
+                    OnboardingState.addWalkingCircumferenceMiles(CurbyConstants.parkingSearchRadiusExpandStepMiles)
                 }
             )
+        }
+    }
+
+    private var isParkedAtSelectedParkingArea: Bool {
+        guard parkingEventDetector.presenceState == .parked,
+              let pin = savedParkPin,
+              let area = selectedParkingArea
+        else { return false }
+        let pinLoc = CLLocation(latitude: pin.coordinate.latitude, longitude: pin.coordinate.longitude)
+        let navLoc = CLLocation(
+            latitude: area.navigationCoordinate.latitude,
+            longitude: area.navigationCoordinate.longitude
+        )
+        return pinLoc.distance(from: navLoc) < 120
+    }
+
+    private func syncSavedParkPinFromDetector() {
+        guard parkingEventDetector.presenceState == .parked,
+              let coord = parkingEventDetector.parkedCoordinateForMap
+        else { return }
+        savedParkPin = SavedParkPinState(
+            coordinate: coord,
+            title: parkingEventDetector.parkedPinDisplayTitle
+        )
+    }
+
+    private func saveParkPin(for area: LiveParkingArea) async {
+        await applySavedPark(
+            coordinate: area.navigationCoordinate,
+            title: area.displayName
+        )
+    }
+
+    private func saveParkPinFromDestinationSheet() async {
+        if let rec = parkingWebSocketManager.activeRecommendation {
+            await applySavedPark(coordinate: rec.area.coordinate, title: rec.area.name)
+            return
+        }
+        if let coord = locationService.currentLocation?.coordinate {
+            await applySavedPark(coordinate: coord, title: "Parked near you")
+        }
+    }
+
+    private func applySavedPark(coordinate: CLLocationCoordinate2D, title: String) async {
+        do {
+            try await parkingEventDetector.recordExplicitPark(at: coordinate, displayTitle: title)
+            savedParkPin = SavedParkPinState(coordinate: coordinate, title: title)
+            CurbyHaptics.notify(.success)
+
+            if let rec = parkingWebSocketManager.activeRecommendation {
+                let chosen = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+                let suggested = CLLocation(
+                    latitude: rec.area.coordinate.latitude,
+                    longitude: rec.area.coordinate.longitude
+                )
+                if chosen.distance(from: suggested) < 90 {
+                    await parkingWebSocketManager.markArrived()
+                }
+            }
+        } catch {
+            CurbyHaptics.notify(.error)
+        }
+    }
+
+    private func clearSavedParkPinIfPresent() async {
+        guard savedParkPin != nil else { return }
+        do {
+            try await parkingEventDetector.recordExplicitDepart()
+            savedParkPin = nil
+            CurbyHaptics.medium()
+        } catch {
+            savedParkPin = nil
+            CurbyHaptics.notify(.error)
         }
     }
 
     // MARK: - Open in Maps
 
     private func openInMaps(coordinate: CLLocationCoordinate2D, name: String) {
+        CurbyHaptics.light()
         let placemark = MKPlacemark(coordinate: coordinate)
         let mapItem = MKMapItem(placemark: placemark)
         mapItem.name = name
@@ -651,116 +860,441 @@ struct MainNavigationView: View {
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
     }
-}
 
-private struct StructurePinItem: Identifiable {
-    let zoneID: UUID
-    let coordinate: CLLocationCoordinate2D
-    let surface: ParkingSurface
-    let spot: ParkingSpot?
-
-    var id: UUID { surface.id }
-
-    var tint: Color {
-        HeatZoneGeometry.color(for: surface.busyLevel)
-    }
-
-    var icon: Ph {
-        switch surface.kind {
-        case .garageFootprint: return .garage
-        case .lotFootprint: return .park
-        case .overviewArea, .curbSegment: return .building
-        }
-    }
-
-    var kindLabel: String {
-        switch surface.kind {
-        case .garageFootprint:
-            return "Garage"
-        case .lotFootprint:
-            return "Lot"
-        case .overviewArea:
-            return "Zone"
-        case .curbSegment:
-            return "Street"
-        }
-    }
-
-    var title: String {
-        if let spotName = spot?.lotName, !spotName.isEmpty {
-            return spotName
-        }
-        return surface.name
-    }
-
-    var compactMetricText: String {
-        if let available = spot?.spotsAvailable {
-            return "\(available)"
-        }
-        if let capacity = spot?.capacityString {
-            return capacity
-        }
-        return surface.busyLevel.label
-    }
-
-    var availabilitySummaryText: String {
-        if let capacity = spot?.capacityString {
-            return "\(capacity) spots"
-        }
-        return surface.busyLevel.displayName
-    }
-
-    var distanceSummaryText: String {
-        guard let walkingDistance = spot?.walkingDistance else {
-            return "Tap for zone"
-        }
-
-        return String(format: "%.2f mi walk", walkingDistance)
+    /// True when Mapbox’s routable point is meaningfully offset from the POI centroid (debug routing).
+    private func navigationCoordinateDiffers(from area: LiveParkingArea, thresholdMeters: Double = 12) -> Bool {
+        let base = CLLocation(latitude: area.coordinate.latitude, longitude: area.coordinate.longitude)
+        let nav = CLLocation(latitude: area.navigationCoordinate.latitude, longitude: area.navigationCoordinate.longitude)
+        return base.distance(from: nav) >= thresholdMeters
     }
 }
 
-private struct StructureParkingPin: View {
-    let item: StructurePinItem
-    let isSelected: Bool
+// MARK: - Developer diagnostics
+
+private struct DeveloperMapDiagnosticsOverlay: View {
+    let mapZoom: Double
+    let searchState: SearchState
+    let parkingAreaManager: ParkingAreaManager
+    let parkingWebSocketManager: ParkingWebSocketManager
+    let remoteConfigService: RemoteConfigService
+    let heatZoneManager: HeatZoneManager
+    let telemetryUploader: TelemetryUploader
+    let parkingEventDetector: ParkingEventDetector
+    let locationService: LocationService
+    let motionStateManager: MotionStateManager
+    let walkingGeofenceMeters: Double
+
+    @State private var developerLogExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Text("DEVELOPER")
+                    .font(.system(size: 9, weight: .heavy, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.orange, in: Capsule())
+
+                Text(liveContextLine)
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Color.orange.opacity(0.35), lineWidth: 0.75)
+                    }
+            }
+            .padding(.horizontal, CurbyConstants.overlayPadding)
+            .padding(.top, 52)
+
+            Spacer()
+
+            if developerLogExpanded {
+                developerLogPanel
+            } else {
+                developerLogPeekChip
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .allowsHitTesting(true)
+    }
+
+    private var developerLogPeekChip: some View {
+        Button {
+            developerLogExpanded = true
+        } label: {
+            HStack(spacing: 8) {
+                Text("Developer log")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.orange.opacity(0.45), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, CurbyConstants.overlayPadding)
+        .padding(.bottom, 120)
+    }
+
+    private var developerLogPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                developerLogExpanded = false
+            } label: {
+                HStack(spacing: 8) {
+                    Text("Hide developer log")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+            .buttonStyle(.plain)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 5) {
+                    line("Map key (on map)", mapLegendLine)
+
+                    line("Dest", searchState.selectedDestination?.name ?? "—")
+                    if let c = searchState.selectedDestination?.coordinate {
+                        line("Dest lat/lng", String(format: "%.5f, %.5f", c.latitude, c.longitude))
+                    }
+
+                    let street = parkingAreaManager.streetAreas.count
+                    let structure = parkingAreaManager.structureAreas.count
+                    line(
+                        "POIs in fence",
+                        "\(parkingAreaManager.areas.count) total · street \(street) · structure \(structure)"
+                    )
+
+                    if parkingAreaManager.isLoading {
+                        line("Mapbox", "loading…")
+                    }
+                    if let err = parkingAreaManager.lastErrorMessage, !err.isEmpty {
+                        line("Mapbox", err)
+                    }
+
+                    line(
+                        "Geofence r",
+                        String(format: "%.0f m (%.2f mi)", walkingGeofenceMeters, walkingGeofenceMeters / CurbyConstants.metersPerMile)
+                    )
+                    line("Heat zones", "\(heatZoneManager.heatZones.count) loaded")
+                    ForEach(Array(heatZoneManager.heatZones.prefix(6))) { zone in
+                        line(
+                            "Zone · \(zone.name.prefix(18))",
+                            "score \(zone.busyScore) · \(zone.busyLevel.displayName) · \(zone.parkingSpots.count) spots"
+                        )
+                    }
+
+                    Divider().opacity(0.35)
+
+                    line("User id", String(CurbyUserIdentity.loadOrCreateUserID().prefix(13)) + "…")
+
+                    if let loc = locationService.currentLocation {
+                        line(
+                            "GPS fix",
+                            String(format: "%.5f, %.5f", loc.coordinate.latitude, loc.coordinate.longitude)
+                        )
+                        line(
+                            "GPS quality",
+                            gpsQualityLine(for: loc)
+                        )
+                    } else {
+                        line("GPS fix", "none")
+                    }
+
+                    line("Motion", "\(motionStateManager.motionState) · reduceAnim \(motionStateManager.shouldReduceAnimations ? "on" : "off")")
+
+                    Divider().opacity(0.35)
+
+                    line("Presence", "\(parkingEventDetector.presenceState.rawValue)")
+                    if let t = parkingEventDetector.lastTransitionAt {
+                        line("Last presence Δ", t.formatted(date: .omitted, time: .standard))
+                    }
+                    if let pe = parkingEventDetector.lastErrorMessage, !pe.isEmpty {
+                        line("Park detector err", pe)
+                    }
+
+                    line("Telemetry Q", "\(telemetryUploader.pendingUploadCount) pending")
+                    if let last = telemetryUploader.lastUploadAt {
+                        line("Telemetry last OK", last.formatted(date: .omitted, time: .standard))
+                    }
+                    if let te = telemetryUploader.lastErrorMessage, !te.isEmpty {
+                        line("Telemetry err", te)
+                    }
+                    line(
+                        "Telemetry cfg",
+                        "every \(remoteConfigService.config.telemetry.uploadIntervalSec)s · min Δ \(Int(remoteConfigService.config.telemetry.minDistanceMeters)) m"
+                    )
+
+                    Divider().opacity(0.35)
+
+                    line("Live session", parkingWebSocketManager.status.developerSummaryLine)
+
+                    if let sid = parkingWebSocketManager.activeSessionID {
+                        line("Session id", String(sid.prefix(10)) + "…")
+                    }
+                    if let r = parkingWebSocketManager.debugLastSearchRadiusMeters {
+                        line("WS radius sent", String(format: "%.0f m", r))
+                    }
+                    if let origin = parkingWebSocketManager.debugSocketOriginCoordinate {
+                        line(
+                            "WS origin",
+                            String(format: "%.5f, %.5f", origin.latitude, origin.longitude)
+                        )
+                    }
+                    line(
+                        "WS refresh rule",
+                        "re-open if you move ≥45 m from WS origin (min 15 s apart)"
+                    )
+                    line("Auto-arrival", "≤120 m from pick or destination puck")
+                    if let code = parkingWebSocketManager.lastErrorCode {
+                        line("Last WS code", code)
+                    }
+
+                    if let pending = parkingWebSocketManager.pendingRouteUpdate {
+                        let r = pending.reasoning
+                        line(
+                            "Pending reroute",
+                            pending.matchQualityShortLabel + " · " + String(r.prefix(100)) + (r.count > 100 ? "…" : "")
+                        )
+                    } else if let reason = parkingWebSocketManager.pendingRouteUpdateReason, !reason.isEmpty {
+                        line("Pending reason", String(reason.prefix(120)))
+                    }
+
+                    if let rec = parkingWebSocketManager.activeRecommendation {
+                        let b = rec.score.breakdown
+                        line("Match rank", String(format: "%.0f%% overall", rec.score.score * 100))
+                        line(
+                            "Factor mix",
+                            String(
+                                format: "avail %.0f · turnover %.0f · travel %.0f · walk %.0f · loadBal %.0f · conf %.0f",
+                                b.availability,
+                                b.turnover,
+                                b.travelTime,
+                                b.walkDistance,
+                                b.loadBalance,
+                                b.confidence ?? 0
+                            )
+                        )
+                        if let congestion = b.congestion {
+                            line("Congestion", String(format: "%.0f", congestion))
+                        }
+                        line(
+                            "Route / walk",
+                            "\(rec.route.driveMinutesText) · \(rec.route.walkMinutesText) · \(rec.route.distanceMilesText)"
+                        )
+                        line(
+                            "Backend reasoning",
+                            String(rec.reasoning.prefix(160)) + (rec.reasoning.count > 160 ? "…" : "")
+                        )
+                    }
+
+                    Divider().opacity(0.35)
+
+                    let w = remoteConfigService.config.algorithm.weights
+                    line(
+                        "Cfg · all weights",
+                        String(
+                            format: "avail %.2f · turn %.2f · travel %.2f · walk %.2f · loadBal %.2f · cong %.2f · conf %.2f",
+                            w.availability,
+                            w.turnover,
+                            w.travelTime,
+                            w.walkDistance,
+                            w.loadBalance,
+                            w.congestion ?? 0,
+                            w.confidence ?? 0
+                        )
+                    )
+                    let algo = remoteConfigService.config.algorithm
+                    line(
+                        "Cfg · algo knobs",
+                        "cap/zone \(algo.estimatedCapacityPerArea) · reEval \(algo.reEvaluationIntervalSec)s · scoreΔ \(algo.scoreUpdateThreshold) · loadK \(algo.loadPenaltyK) · minUsers \(algo.confidenceMinUsers)"
+                    )
+                    let det = remoteConfigService.config.detection
+                    line(
+                        "Cfg · detection",
+                        "park \(det.parkDetectionDurationSec)s / \(Int(det.parkDetectionDriftMeters)) m · depart \(det.departDetectionDurationSec)s"
+                    )
+                    line(
+                        "Cfg search",
+                        "default \(Int(remoteConfigService.config.search.defaultRadiusMeters)) m · max \(Int(remoteConfigService.config.search.maxRadiusMeters)) m · candidates \(remoteConfigService.config.search.maxCandidates) · occ \(Int(remoteConfigService.config.search.occupancyRadiusMeters)) m"
+                    )
+                    if let updated = remoteConfigService.lastUpdatedAt {
+                        line("Cfg updated", updated.formatted(date: .omitted, time: .shortened))
+                    }
+                    if let cfgErr = remoteConfigService.lastErrorMessage, !cfgErr.isEmpty {
+                        line("Cfg error", cfgErr)
+                    }
+                }
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.primary)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color.orange.opacity(0.45), lineWidth: 1)
+                }
+            }
+            .frame(maxHeight: 320)
+        }
+        .padding(.horizontal, CurbyConstants.overlayPadding)
+        .padding(.bottom, 120)
+    }
+
+    private var liveContextLine: String {
+        let zoom = String(format: "z%.1f", mapZoom)
+        let motion = "\(motionStateManager.motionState)"
+        let speed = String(format: "%.1f m/s", locationService.currentSpeed)
+        let acc: String = {
+            let h = locationService.horizontalAccuracy
+            guard h > 0 else { return "acc —" }
+            return String(format: "±%.0fm", h)
+        }()
+        return "\(zoom) · \(motion) · \(speed) · \(acc)"
+    }
+
+    private var mapLegendLine: String {
+        "yellow dots · POI centroids in fence · white fan→POIs · pink POI→Nav · cyan you→dest · yellow line you→pick · orange ±GPS · purple 45m WS · green 120m pick · teal 120m dest · no geofence fill (ring only)"
+    }
+
+    private func line(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(title.uppercased())
+                .font(.system(size: 8, weight: .bold, design: .rounded))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func gpsQualityLine(for loc: CLLocation) -> String {
+        let acc = max(0, loc.horizontalAccuracy)
+        let spd = max(0, loc.speed)
+        let coursePart: String = {
+            guard loc.course >= 0 else { return "course —" }
+            return String(format: "course %.0f°", loc.course)
+        }()
+        return String(format: "±%.0f m · %.1f m/s · %@", acc, spd, coursePart)
+    }
+}
+
+private extension CurbyParkingSearchStatus {
+    var developerSummaryLine: String {
+        switch self {
+        case .idle:
+            return "idle"
+        case .connecting:
+            return "connecting…"
+        case .searching:
+            return "searching…"
+        case .recommended:
+            return "recommended"
+        case .noData(let message):
+            return "no_data: \(message)"
+        case .error(let message):
+            return "error: \(message)"
+        case .arrived:
+            return "arrived"
+        }
+    }
+}
+
+private struct WebSocketOriginMapPin: View {
+    var body: some View {
+        VStack(spacing: 2) {
+            Text("WS")
+                .font(.system(size: 9, weight: .heavy, design: .rounded))
+                .foregroundStyle(.white)
+                .frame(width: 28, height: 18)
+                .background(Color.purple.opacity(0.92), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+
+            Text("session origin")
+                .font(.system(size: 7, weight: .medium))
+                .foregroundStyle(.secondary)
+        }
+        .padding(5)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Color.purple.opacity(0.55), lineWidth: 1)
+        }
+        .accessibilityLabel("WebSocket session origin")
+    }
+}
+
+private struct NavigationAnchorMapPin: View {
+    let areaName: String
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Text("Nav")
+                .font(.system(size: 8, weight: .heavy, design: .rounded))
+                .foregroundStyle(.white)
+                .frame(width: 22, height: 16)
+                .background(Color.orange, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+
+            Text(areaName)
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .frame(maxWidth: 96)
+        }
+        .padding(5)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Color.orange.opacity(0.6), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Routable navigation point for \(areaName)")
+    }
+}
+
+private struct DestinationMapPin: View {
+    let name: String
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
-                item.icon.fill
+                Ph.mapPin.fill
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .foregroundStyle(.white)
                     .frame(width: 11, height: 11)
-                    .frame(width: 20, height: 20)
-                    .background(item.tint, in: Circle())
+                    .frame(width: 22, height: 22)
+                    .background(CurbyGlass.destinationTint, in: Circle())
 
-                Text(item.compactMetricText)
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                Text(name)
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
-                    .fixedSize()
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(
-                Capsule()
-                    .fill(item.tint.opacity(isSelected ? 0.20 : 0.10))
-            )
-            .overlay(
-                Capsule()
-                    .strokeBorder(item.tint.opacity(isSelected ? 0.85 : 0.0), lineWidth: 1.5)
-            )
-            .curbyGlassSurface(tint: item.tint, cornerRadius: 16)
-            .shadow(
-                color: item.tint.opacity(isSelected ? 0.35 : 0.18),
-                radius: isSelected ? 10 : 5,
-                y: isSelected ? 4 : 2
-            )
-            .scaleEffect(isSelected ? 1.12 : 1.0)
-            .animation(.spring(response: 0.22, dampingFraction: 0.72), value: isSelected)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .curbyGlassSurface(tint: CurbyGlass.destinationTint, cornerRadius: 18)
 
             Triangle()
-                .fill(item.tint)
+                .fill(CurbyGlass.destinationTint)
                 .frame(width: 10, height: 6)
                 .rotationEffect(.degrees(180))
                 .offset(y: -1)
@@ -768,9 +1302,265 @@ private struct StructureParkingPin: View {
     }
 }
 
+private struct RecommendationMapPin: View {
+    let recommendation: CurbyParkingRecommendation
+    let isArrived: Bool
+    var developerMode: Bool = false
+
+    private var pinTint: Color { isArrived ? CurbyGlass.successTint : CurbyGlass.primaryTint }
+
+    var body: some View {
+        VStack(spacing: 2) {
+            // "Best Match" badge sits above the balloon
+            if !isArrived {
+                Text("Best Match")
+                    .font(.system(size: 9, weight: .heavy, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(pinTint, in: Capsule())
+                    .shadow(color: pinTint.opacity(0.3), radius: 4, y: 2)
+            }
+
+            VStack(spacing: 0) {
+                HStack(spacing: 6) {
+                    Ph.park.fill
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .foregroundStyle(.white)
+                        .frame(width: 11, height: 11)
+                        .frame(width: 22, height: 22)
+                        .background(pinTint, in: Circle())
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(recommendation.area.categoryLabel)
+                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                            .foregroundStyle(.secondary)
+
+                        Text(recommendation.area.name)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+
+                        if developerMode {
+                            Text(developerScoreLine)
+                                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                            Text(developerRouteLine)
+                                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .curbyGlassSurface(tint: pinTint, cornerRadius: 18)
+                .shadow(color: pinTint.opacity(0.22), radius: 10, y: 5)
+
+                Triangle()
+                    .fill(pinTint)
+                    .frame(width: 10, height: 6)
+                    .rotationEffect(.degrees(180))
+                    .offset(y: -1)
+            }
+        }
+    }
+
+    private var developerScoreLine: String {
+        let b = recommendation.score.breakdown
+        return String(
+            format: "Score %.0f%% · loadBal %.0f · travel %.0f",
+            recommendation.score.score * 100,
+            b.loadBalance,
+            b.travelTime
+        )
+    }
+
+    private var developerRouteLine: String {
+        "\(recommendation.route.driveMinutesText) · \(recommendation.route.walkMinutesText)"
+    }
+}
+
+private struct LiveParkingAreaMapPin: View {
+    let area: LiveParkingArea
+    let isSelected: Bool
+    var developerLabels: Bool = false
+
+    var body: some View {
+        if isSelected {
+            // Expanded detail balloon — same style as recommendation pin
+            VStack(spacing: 0) {
+                HStack(spacing: 6) {
+                    icon.fill
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .foregroundStyle(.white)
+                        .frame(width: 11, height: 11)
+                        .frame(width: 22, height: 22)
+                        .background(tint, in: Circle())
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(kindLabel)
+                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                            .foregroundStyle(.secondary)
+
+                        Text(area.mapLabel)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+
+                        if developerLabels {
+                            Text(developerSubtitle)
+                                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(2)
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .curbyGlassSurface(tint: tint, cornerRadius: 18)
+                .shadow(color: tint.opacity(0.18), radius: 8, y: 4)
+
+                Triangle()
+                    .fill(tint)
+                    .frame(width: 10, height: 6)
+                    .rotationEffect(.degrees(180))
+                    .offset(y: -1)
+            }
+        } else {
+            // Compact alternative pin — small circle with "P" and colored ring
+            ZStack {
+                Circle()
+                    .fill(.white.opacity(0.92))
+                    .frame(width: 28, height: 28)
+                    .overlay {
+                        Circle()
+                            .strokeBorder(tint, lineWidth: 2.5)
+                    }
+                    .shadow(color: .black.opacity(0.18), radius: 4, y: 2)
+
+                Text(kindInitial)
+                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .foregroundStyle(tint)
+            }
+        }
+    }
+
+    private var icon: Ph {
+        switch area.kind {
+        case .garage:
+            return .garage
+        case .lot:
+            return .park
+        case .street:
+            return .roadHorizon
+        case .general:
+            return .mapPinArea
+        }
+    }
+
+    private var kindLabel: String {
+        switch area.kind {
+        case .garage: return "Garage"
+        case .lot: return "Lot"
+        case .street: return "Street"
+        case .general: return "Parking"
+        }
+    }
+
+    private var kindInitial: String {
+        switch area.kind {
+        case .garage: return "G"
+        case .lot: return "L"
+        case .street: return "S"
+        case .general: return "P"
+        }
+    }
+
+    private var developerSubtitle: String {
+        var parts: [String] = []
+        if let meters = area.destinationDistanceMeters {
+            parts.append(String(format: "Δ dest %.0f m", meters))
+        } else if let meters = area.distanceMeters {
+            parts.append(String(format: "prox %.0f m", meters))
+        }
+        if !area.categoryIDs.isEmpty {
+            parts.append(area.categoryIDs.prefix(2).joined(separator: ","))
+        }
+        parts.append(String(area.id.prefix(10)))
+        return parts.joined(separator: " · ")
+    }
+
+    private var tint: Color {
+        switch area.kind {
+        case .garage:
+            return CurbyGlass.primaryTint
+        case .lot:
+            return CurbyGlass.warningTint
+        case .street:
+            return CurbyGlass.successTint
+        case .general:
+            return CurbyGlass.destinationTint
+        }
+    }
+}
 
 // MARK: - Preview
 
 #Preview {
     MainNavigationView()
+}
+
+// MARK: - Saved park pin (manual Supabase `active_parks`)
+
+private struct SavedParkPinState: Equatable {
+    let coordinate: CLLocationCoordinate2D
+    let title: String
+
+    static func == (lhs: SavedParkPinState, rhs: SavedParkPinState) -> Bool {
+        lhs.title == rhs.title
+            && lhs.coordinate.latitude == rhs.coordinate.latitude
+            && lhs.coordinate.longitude == rhs.coordinate.longitude
+    }
+}
+
+private struct SavedParkMapPin: View {
+    let title: String
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Ph.park.fill
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .foregroundStyle(.white)
+                    .frame(width: 11, height: 11)
+                    .frame(width: 22, height: 22)
+                    .background(CurbyGlass.successTint, in: Circle())
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Parked")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundStyle(.secondary)
+
+                    Text(title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .curbyGlassSurface(tint: CurbyGlass.successTint, cornerRadius: 18)
+            .shadow(color: CurbyGlass.successTint.opacity(0.2), radius: 8, y: 4)
+
+            Triangle()
+                .fill(CurbyGlass.successTint)
+                .frame(width: 10, height: 6)
+                .rotationEffect(.degrees(180))
+                .offset(y: -1)
+        }
+    }
 }

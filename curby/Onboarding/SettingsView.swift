@@ -37,9 +37,39 @@ struct SettingsView: View {
                     walkingRow
                     sliderRow
                 } header: {
-                    Text("Walking Distance")
+                    Text("Parking Geofence")
                 } footer: {
-                    Text("Only parking within this distance will be shown.")
+                    Text("Curby only shows and recommends parking inside this distance around your destination. Changes refresh the map geofence immediately.")
+                        .font(.footnote)
+                }
+
+                // MARK: - Developer
+                Section {
+                    Toggle(isOn: $state.developerModeEnabled) {
+                        HStack(spacing: 14) {
+                            Ph.code.bold
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .foregroundStyle(.white)
+                                .frame(width: 16, height: 16)
+                                .frame(width: 30, height: 30)
+                                .background(Color.orange.opacity(0.85), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Developer Mode")
+                                    .font(.body)
+                                Text("Diagnostics on the map")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .tint(.orange)
+                    .onChange(of: state.developerModeEnabled) { _, _ in
+                        CurbyHaptics.selection()
+                    }
+                } footer: {
+                    Text("Shows a pin for every parking candidate inside the geofence; tap a pin for labels and debug fields. Marks routable navigation points when they differ from the POI, and shows live routing session details (match quality, load balancing, pending updates).")
                         .font(.footnote)
                 }
 
@@ -53,6 +83,7 @@ struct SettingsView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") {
+                        CurbyHaptics.light()
                         dismiss()
                     }
                     .fontWeight(.semibold)
@@ -95,6 +126,7 @@ struct SettingsView: View {
                     .frame(width: 22, height: 22)
             } else {
                 Button {
+                    CurbyHaptics.medium()
                     state.requestLocationPermission()
                 } label: {
                     Text(state.locationDenied ? "Open Settings" : "Enable")
@@ -133,8 +165,14 @@ struct SettingsView: View {
                 .frame(width: 30, height: 30)
                 .background(CurbyGlass.successTint, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
 
-            Text("Max Distance")
-                .font(.body)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Max Walk to Destination")
+                    .font(.body)
+
+                Text("Destination parking fence")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             Spacer()
 

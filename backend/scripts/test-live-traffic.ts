@@ -50,7 +50,7 @@ async function testLiveTraffic() {
     }
 
     // You can also access exact segment-by-segment congestion points:
-    console.log(`\n🛣️ Sample of Congestion Numeric Array (0 = blocked, 100 = free-flow):`);
+    console.log(`\n🛣️ Sample of Congestion Numeric Array (0 = no congestion, 100 = max congestion):`);
     // Showing just the first 10 segment blocks
     console.log(route.legs[0].annotation.congestion_numeric.slice(0, 10));
     

@@ -33,7 +33,7 @@ enum BusyLevel: String, CaseIterable, Codable {
         }
     }
 
-    /// Initialise from a 0–100 busy score.
+    /// Initialise from a 0–100 how-busy reading.
     init(score: Int) {
         switch score {
         case 0..<CurbyConstants.busyScoreOpen:
@@ -308,23 +308,23 @@ struct ParkingSpot: Identifiable, Hashable {
         return BusyLevel(score: Int(occupancy * 100))
     }
 
-    /// A unified 0-100 score for UI display.
+    /// A unified 0–100 openness index for UI display.
     var computedScore: Int? {
         if type == .streetCurbside || type == .metered {
             guard let prob = opennessProbability else { return nil }
             return Int(prob * 100)
         } else {
             // Simplified logic: availability percentage
-            // Later this will be populated directly from the backend parking score algorithm
+            // Later this will be populated directly from the backend parking model
             guard let available = spotsAvailable, let total = totalSpots, total > 0 else { return nil }
             return Int((Double(available) / Double(total)) * 100)
         }
     }
 
-    /// Unified busy level based on the computed score.
+    /// Unified busy level based on the computed openness index.
     var computedBusyLevel: BusyLevel {
         guard let score = computedScore else { return .open }
-        // For parking score, higher means MORE open.
+        // Higher openness index means more likely to find a spot.
         if score >= 60 { return .open }
         if score >= 30 { return .busy }
         return .veryBusy

@@ -42,6 +42,24 @@ MAPBOX_ACCESS_TOKEN=pk.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 > [!CAUTION]
 > **Never commit `.env` to git.** It's already in `.gitignore`.
 
+### OpenStreetMap (Overpass) — parking discovery
+
+The API gateway merges **OpenStreetMap** parking features from a public **Overpass** endpoint with **Mapbox Search** POIs before running the same scoring formula (no extra secret in `.env`). Tunables live in KV `app_config.search`:
+
+- `osmCompanionSearch` — default `true`; set `false` to use Mapbox only.
+- `overpassInterpreterUrl` — optional; defaults to `https://overpass-api.de/api/interpreter`. For production volume, run your own Overpass instance and point this URL there.
+- `osmFetchTimeoutMs` — default **1500** (1.5s); Overpass is aborted after this so `find_parking` does not wait on slow public servers (Mapbox-only merge for that run if OSM misses the deadline).
+
+After deploy, re-seed KV so older projects pick up the new keys (the deploy script runs `seed-config.js`).
+
+**Local smoke test**
+
+```bash
+cd backend/scripts && npx tsx test-osm-parking.ts
+# With merged Mapbox + OSM (needs token):
+MAPBOX_TOKEN=pk.… npx tsx test-osm-parking.ts
+```
+
 ---
 
 ## Step 3: Login to Cloudflare

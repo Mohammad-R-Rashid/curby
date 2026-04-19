@@ -73,7 +73,12 @@ export default {
           );
       }
 
-      // Append CORS headers to every response
+      // WebSocket upgrade responses cannot have headers mutated after creation.
+      if (response.status === 101) {
+        return response;
+      }
+
+      // Append CORS headers to every HTTP response
       for (const [k, v] of Object.entries(corsHeaders)) {
         response.headers.set(k, v);
       }

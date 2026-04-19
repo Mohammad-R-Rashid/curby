@@ -47,6 +47,8 @@ export interface MapboxParkingArea {
   name: string;
   center: LatLng;
   category: string;   // 'parking_lot', 'parking_garage', 'parking', etc.
+  /** Discovery source — used for logging / reasoning; same scoring pipeline for all. */
+  dataSource?: 'mapbox' | 'osm';
 }
 
 export interface MapboxMatrixResult {
@@ -104,6 +106,7 @@ export interface ScoredArea {
     availability: number;
     turnover: number;
     travelTime: number;
+    congestion: number;
     walkDistance: number;
     loadBalance: number;
     confidence: number;

@@ -2,7 +2,7 @@
 //  SearchState.swift
 //  curby
 //
-//  Search logic — manages text input, Mapbox geocoding, and recents.
+//  Search logic — manages text input, OSM Nominatim geocoding, and recents.
 //
 
 import CoreLocation
@@ -23,7 +23,19 @@ struct RecentDestination: Identifiable, Codable, Hashable {
     }
 }
 
-/// Manages search text, Mapbox geocoding results, and recent destinations.
+private struct NominatimSearchItem: Decodable {
+    let lat: String
+    let lon: String
+    let displayName: String
+    let name: String?
+
+    enum CodingKeys: String, CodingKey {
+        case lat, lon, name
+        case displayName = "display_name"
+    }
+}
+
+/// Manages search text, geocoding results (OpenStreetMap Nominatim), and recent destinations.
 @Observable
 final class SearchState {
 
@@ -35,7 +47,7 @@ final class SearchState {
     /// Whether the search field is active (keyboard visible).
     var isSearchActive: Bool = false
 
-    /// Geocoding results from Mapbox.
+    /// Geocoding results (Nominatim / OSM).
     private(set) var searchResults: [SearchResult] = []
 
     /// Loading state for geocoding.
@@ -47,18 +59,13 @@ final class SearchState {
     /// The selected destination (triggers navigation to map).
     var selectedDestination: SelectedDestination?
 
-    /// User's current location for proximity-biased search.
+    /// User's current location for proximity-biased ordering.
     var userLocation: CLLocationCoordinate2D?
 
     // MARK: - Private
 
     private var searchTask: Task<Void, Never>?
     private static let recentsKey = "curby_recent_destinations"
-
-    /// Mapbox access token from Info.plist.
-    private var mapboxToken: String? {
-        Bundle.main.object(forInfoDictionaryKey: "MBXAccessToken") as? String
-    }
 
     // MARK: - Init
 
@@ -68,12 +75,12 @@ final class SearchState {
 
     // MARK: - Search
 
-    /// Called when search text changes. Debounces and triggers Mapbox geocoding.
+    /// Called when search text changes. Debounces and queries Nominatim.
     func onSearchTextChanged() {
         searchTask?.cancel()
 
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard query.count >= 3 else {
+        guard query.count >= 2 else {
             searchResults = []
             isSearching = false
             return
@@ -82,83 +89,109 @@ final class SearchState {
         isSearching = true
 
         searchTask = Task { @MainActor in
-            // Debounce
             try? await Task.sleep(for: .milliseconds(Int(CurbyConstants.searchDebounceInterval * 1000)))
             guard !Task.isCancelled else { return }
 
-            let results = await geocode(query: query)
+            let results = await geocodeNominatim(query: query)
             guard !Task.isCancelled else { return }
             searchResults = results
             isSearching = false
         }
     }
 
-    // MARK: - Mapbox Geocoding
+    // MARK: - Nominatim (OpenStreetMap)
 
-    /// Call the Mapbox Geocoding API to find addresses/places.
-    private func geocode(query: String) async -> [SearchResult] {
-        guard let token = mapboxToken,
-              let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
-        else { return [] }
+    /// Forward geocode via OSM Nominatim, biased to the Austin service area.
+    private func geocodeNominatim(query: String) async -> [SearchResult] {
+        var components = URLComponents(string: "https://nominatim.openstreetmap.org/search")
+        components?.queryItems = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "format", value: "jsonv2"),
+            URLQueryItem(name: "limit", value: "12"),
+            URLQueryItem(name: "addressdetails", value: "1"),
+            URLQueryItem(name: "bounded", value: "1"),
+            URLQueryItem(name: "viewbox", value: CurbyConstants.nominatimViewboxParameter),
+            URLQueryItem(name: "countrycodes", value: "us"),
+        ]
 
-        var urlString = "https://api.mapbox.com/geocoding/v5/mapbox.places/\(encoded).json"
-        urlString += "?access_token=\(token)"
-        urlString += "&limit=6"
-        urlString += "&types=address,poi,neighborhood,locality,place"
+        guard let url = components?.url else { return [] }
 
-        // Proximity bias — prefer results near the user
-        if let loc = userLocation {
-            urlString += "&proximity=\(loc.longitude),\(loc.latitude)"
-        }
-
-        guard let url = URL(string: urlString) else { return [] }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue(CurbyConstants.nominatimUserAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
+        request.timeoutInterval = 12
 
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
+            let (data, response) = try await URLSession.shared.data(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200
+                  (200 ... 299).contains(httpResponse.statusCode)
             else { return [] }
 
-            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-            let features = json?["features"] as? [[String: Any]] ?? []
+            let items = try JSONDecoder().decode([NominatimSearchItem].self, from: data)
 
-            return features.compactMap { feature -> SearchResult? in
-                guard let center = feature["center"] as? [Double],
-                      center.count == 2
-                else { return nil }
+            var seen = Set<String>()
+            var results: [SearchResult] = []
+            results.reserveCapacity(items.count)
 
-                let placeName = feature["place_name"] as? String ?? ""
-                let text = feature["text"] as? String ?? placeName
+            for item in items {
+                guard let lat = Double(item.lat),
+                      let lon = Double(item.lon)
+                else { continue }
 
-                // Build a clean subtitle from the full place name
-                let subtitle: String
-                if placeName.hasPrefix(text + ", ") {
-                    subtitle = String(placeName.dropFirst(text.count + 2))
-                } else {
-                    subtitle = placeName
-                }
+                let coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+                guard CurbyConstants.isWithinAustinArea(coordinate) else { continue }
 
-                return SearchResult(
-                    id: UUID(),
-                    name: text,
-                    subtitle: subtitle,
-                    coordinate: CLLocationCoordinate2D(
-                        latitude: center[1],
-                        longitude: center[0]
+                let key = String(format: "%.4f,%.4f", lat, lon)
+                guard seen.insert(key).inserted else { continue }
+
+                let primary = (item.name?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+                    ?? primaryName(from: item.displayName)
+
+                let subtitle = subtitleFromDisplayName(item.displayName, excludingPrimary: primary)
+
+                results.append(
+                    SearchResult(
+                        id: UUID(),
+                        name: primary,
+                        subtitle: subtitle,
+                        coordinate: coordinate
                     )
                 )
             }
+
+            // Keep Nominatim relevance order (do not re-sort by distance — hurts ranking for partial queries).
+            return Array(results.prefix(10))
         } catch {
-            print("[SearchState] Geocoding error: \(error.localizedDescription)")
+            print("[SearchState] Nominatim error: \(error.localizedDescription)")
             return []
         }
+    }
+
+    private func primaryName(from displayName: String) -> String {
+        let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let comma = trimmed.firstIndex(of: ",") else { return trimmed }
+        return String(trimmed[..<comma]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func subtitleFromDisplayName(_ displayName: String, excludingPrimary primary: String) -> String {
+        let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix(primary + ",") {
+            let rest = trimmed.dropFirst(primary.count).drop(while: { $0 == "," || $0 == " " })
+            return String(rest)
+        }
+        return trimmed
     }
 
     // MARK: - Selection
 
     /// Select a destination from search results, popular locations, or recents.
     func selectDestination(name: String, subtitle: String, coordinate: CLLocationCoordinate2D) {
+        guard CurbyConstants.isWithinAustinArea(coordinate) else {
+            return
+        }
+
         let destination = SelectedDestination(
             name: name,
             subtitle: subtitle,

@@ -14,6 +14,8 @@ import UIKit
 @Observable
 final class OnboardingState {
 
+    static let preferencesDidChangeNotification = Notification.Name("curby.preferencesDidChange")
+
     // MARK: - Permission State
 
     /// Whether location access has been granted (WhenInUse or Always).
@@ -33,6 +35,15 @@ final class OnboardingState {
     var walkingCircumference: Double {
         didSet {
             UserDefaults.standard.set(walkingCircumference, forKey: Self.walkingKey)
+            NotificationCenter.default.post(name: Self.preferencesDidChangeNotification, object: nil)
+        }
+    }
+
+    /// When enabled, the map shows diagnostic pins, routing anchors, and a live session panel.
+    var developerModeEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(developerModeEnabled, forKey: Self.developerModeKey)
+            NotificationCenter.default.post(name: Self.preferencesDidChangeNotification, object: nil)
         }
     }
 
@@ -51,12 +62,14 @@ final class OnboardingState {
 
     private static let walkingKey = "curby_walking_circumference"
     private static let onboardingKey = "curby_has_completed_onboarding"
+    private static let developerModeKey = "curby_developer_mode_enabled"
 
     // MARK: - Init
 
     init() {
         let saved = UserDefaults.standard.double(forKey: Self.walkingKey)
         self.walkingCircumference = saved > 0 ? saved : CurbyConstants.walkingCircumferenceDefault
+        self.developerModeEnabled = UserDefaults.standard.object(forKey: Self.developerModeKey) as? Bool ?? false
 
         // Check current permission state
         let status = locationManager.authorizationStatus
@@ -101,6 +114,36 @@ final class OnboardingState {
     static var storedWalkingCircumference: Double {
         let saved = UserDefaults.standard.double(forKey: walkingKey)
         return saved > 0 ? saved : CurbyConstants.walkingCircumferenceDefault
+    }
+
+    static var storedWalkingDistanceMeters: Double {
+        storedWalkingCircumference * CurbyConstants.metersPerMile
+    }
+
+    /// Adds miles to the saved walking geofence, clamped to `walkingCircumferenceMin`…`max`, then notifies `preferencesDidChangeNotification`.
+    static func addWalkingCircumferenceMiles(_ deltaMiles: Double) {
+        let current = storedWalkingCircumference
+        let next = min(
+            max(current + deltaMiles, CurbyConstants.walkingCircumferenceMin),
+            CurbyConstants.walkingCircumferenceMax
+        )
+        guard abs(next - current) > 0.000_1 else { return }
+        UserDefaults.standard.set(next, forKey: walkingKey)
+        NotificationCenter.default.post(name: preferencesDidChangeNotification, object: nil)
+    }
+
+    /// Whether `addWalkingCircumferenceMiles` would actually change storage (false when already at max).
+    static func canAddWalkingCircumferenceMiles(_ deltaMiles: Double) -> Bool {
+        let current = storedWalkingCircumference
+        let next = min(
+            max(current + deltaMiles, CurbyConstants.walkingCircumferenceMin),
+            CurbyConstants.walkingCircumferenceMax
+        )
+        return abs(next - current) > 0.000_1
+    }
+
+    static var storedDeveloperModeEnabled: Bool {
+        UserDefaults.standard.object(forKey: developerModeKey) as? Bool ?? false
     }
 
     /// Refresh permission states from system (for Settings screen re-entry).

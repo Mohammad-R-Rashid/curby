@@ -68,9 +68,9 @@ struct HeatZoneOverlay: View {
 
     private var legendView: some View {
         VStack(alignment: .leading, spacing: 6) {
-            legendRow(color: Color(red: 0.30, green: 0.78, blue: 0.40), label: "Open")
-            legendRow(color: Color(red: 1.0, green: 0.70, blue: 0.20), label: "Busy")
-            legendRow(color: Color(red: 1.0, green: 0.35, blue: 0.30), label: "Very Busy")
+            legendRow(color: Color(red: 0.32, green: 0.78, blue: 0.52), label: "Open")
+            legendRow(color: Color(red: 1.0, green: 0.62, blue: 0.28), label: "Busy")
+            legendRow(color: Color(red: 1.0, green: 0.48, blue: 0.42), label: "Very Busy")
         }
         .padding(10)
         .background(

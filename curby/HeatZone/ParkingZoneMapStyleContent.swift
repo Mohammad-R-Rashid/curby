@@ -368,36 +368,36 @@ private struct ParkingSurfaceVisualStyle {
     static let overview = ParkingSurfaceVisualStyle(
         slot: .bottom,
         fillOpacity: 0.28,
-        strokeOpacity: 0.42,
-        strokeWidth: 1.4,
-        selectedFillOpacity: 0.38,
-        selectedStrokeWidth: 2.0
+        strokeOpacity: 0.0,
+        strokeWidth: 0.0,
+        selectedFillOpacity: 0.40,
+        selectedStrokeWidth: 0.0
     )
 
     static let street = ParkingSurfaceVisualStyle(
         slot: .middle,
-        fillOpacity: 1.0,
+        fillOpacity: 0.62,
         strokeOpacity: 0.0,
         strokeWidth: 5.5,
-        selectedFillOpacity: 1.0,
+        selectedFillOpacity: 0.78,
         selectedStrokeWidth: 8.5
     )
 
     static let garage = ParkingSurfaceVisualStyle(
         slot: nil,
-        fillOpacity: 0.24,
+        fillOpacity: 0.17,
         strokeOpacity: 1.0,
         strokeWidth: 2.4,
-        selectedFillOpacity: 0.36,
+        selectedFillOpacity: 0.28,
         selectedStrokeWidth: 3.2
     )
 
     static let lot = ParkingSurfaceVisualStyle(
         slot: nil,
-        fillOpacity: 0.22,
+        fillOpacity: 0.16,
         strokeOpacity: 1.0,
         strokeWidth: 2.0,
-        selectedFillOpacity: 0.32,
+        selectedFillOpacity: 0.26,
         selectedStrokeWidth: 3.0
     )
 }

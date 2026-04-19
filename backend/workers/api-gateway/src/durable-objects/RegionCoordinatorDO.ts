@@ -13,7 +13,7 @@ import {
   getConfig,
   WSCommandSchema,
   scoreAllAreas,
-  searchParkingAreas,
+  discoverParkingAreas,
   matrixDriving,
   matrixWalking,
   getDirections,
@@ -174,6 +174,21 @@ export class RegionCoordinatorDO extends DurableObject<Env> {
     destLng: number,
     radius?: number,
   ): Promise<void> {
+    const isWithinAustinArea =
+      destLat >= 30.05 &&
+      destLat <= 30.55 &&
+      destLng >= -98.10 &&
+      destLng <= -97.40;
+
+    if (!isWithinAustinArea) {
+      this.send(ws, {
+        type: 'error',
+        code: 'OUTSIDE_AUSTIN',
+        message: 'Curby currently supports live parking only in Austin.',
+      });
+      return;
+    }
+
     const config = await getConfig(this.env.CURBY_CONFIG);
     const searchRadius = radius ?? config.search.defaultRadiusMeters;
     const destination: LatLng = { lat: destLat, lng: destLng };
@@ -192,12 +207,13 @@ export class RegionCoordinatorDO extends DurableObject<Env> {
     try {
       // ── PHASE 1: Broad Screening ────────────────────────
 
-      // 1. Find parking areas near destination
-      const areas = await searchParkingAreas(
+      // 1. Find parking areas near destination (Mapbox POIs + OSM Overpass companion)
+      const areas = await discoverParkingAreas(
         destination,
         searchRadius,
         config.search.maxCandidates,
         this.env.MAPBOX_ACCESS_TOKEN,
+        config.search,
       );
 
       if (areas.length === 0) {
@@ -246,6 +262,7 @@ export class RegionCoordinatorDO extends DurableObject<Env> {
           parkedCount: occupancyData[idx] ?? 0,
           recentDepartures: departureData[idx] ?? 0,
           departureRate: (departureData[idx] ?? 0) / config.algorithm.recentDepartureWindowMin,
+          arrivalRate: 0,
           parkDurations: durationData[idx] ?? [],
           recentUniqueUsers: confidenceData[idx] ?? 0,
         },

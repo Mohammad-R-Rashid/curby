@@ -277,8 +277,7 @@ struct OnboardingView: View {
 
     private var getStartedButton: some View {
         Button {
-            let generator = UIImpactFeedbackGenerator(style: .medium)
-            generator.impactOccurred()
+            CurbyHaptics.medium()
             state.completeOnboarding()
             withAnimation(.spring(response: 0.4)) {
                 hasCompletedOnboarding = true

@@ -25,6 +25,8 @@ struct ExpandedMapView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
 
+    @State private var currentMapZoom: Double = CurbyConstants.zoomDefault
+
     var body: some View {
         ZStack {
             // MARK: - Map
@@ -51,10 +53,10 @@ struct ExpandedMapView: View {
                 isLoading: heatZoneManager.isLoading
             )
 
-            // MARK: - Top Controls
-            VStack {
+            // MARK: - Controls + Bottom Stack
+            VStack(spacing: 0) {
+                // Top controls row
                 HStack {
-                    // Back button
                     Button {
                         dismiss()
                     } label: {
@@ -73,7 +75,6 @@ struct ExpandedMapView: View {
 
                     Spacer()
 
-                    // Compass
                     MapOverlayView(
                         cameraController: cameraController,
                         locationService: locationService,
@@ -86,18 +87,14 @@ struct ExpandedMapView: View {
 
                 Spacer()
 
-                // MARK: - Bottom Bar
-                bottomBar
-            }
-
-            // MARK: - Zone List (Tappable zones)
-            if !heatZoneManager.heatZones.isEmpty {
-                VStack {
-                    Spacer()
-
+                // Zone carousel sits just above the destination bar
+                if !heatZoneManager.heatZones.isEmpty {
                     zoneCarousel
-                        .padding(.bottom, 100)
+                        .padding(.bottom, 10)
                 }
+
+                // Destination bottom bar
+                bottomBar
             }
         }
         .navigationBarHidden(true)
@@ -105,7 +102,8 @@ struct ExpandedMapView: View {
             if let dest = destination {
                 heatZoneManager.loadZones(
                     around: dest.coordinate,
-                    destinationName: dest.name
+                    destinationName: dest.name,
+                    radiusMeters: OnboardingState.storedWalkingDistanceMeters
                 )
             }
         }
@@ -117,9 +115,18 @@ struct ExpandedMapView: View {
     private var mapLayer: some View {
         Map(viewport: $cameraController.viewport) {
             Puck2D(bearing: .heading)
+
+            ParkingZoneMapStyleContent(
+                zones: heatZoneManager.heatZones,
+                selectedZoneID: heatZoneManager.selectedZone?.id,
+                zoom: currentMapZoom
+            )
         }
         .mapStyle(colorScheme == .dark ? .dark : .standard)
         .ornamentOptions(OrnamentOptions(compass: CompassViewOptions(visibility: .hidden)))
+        .onCameraChanged { change in
+            currentMapZoom = change.cameraState.zoom
+        }
     }
 
     // MARK: - Bottom Bar
@@ -207,7 +214,7 @@ struct ExpandedMapView: View {
             }
 
             HStack(spacing: 4) {
-                Text("Score: \(zone.busyScore)")
+                Text("Activity: \(zone.busyScore)/100")
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundStyle(busyColor(zone.busyLevel))
 

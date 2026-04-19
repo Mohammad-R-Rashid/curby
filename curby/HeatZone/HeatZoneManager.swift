@@ -36,15 +36,22 @@ final class HeatZoneManager {
     // MARK: - Public
 
     /// Load heat zones around a destination coordinate.
-    func loadZones(around coordinate: CLLocationCoordinate2D, destinationName: String) {
+    func loadZones(
+        around coordinate: CLLocationCoordinate2D,
+        destinationName: String,
+        radiusMeters: Double = 400
+    ) {
         isLoading = true
         alignedStreetSurfaceReferences = []
         alignedStructureSurfaceReferences = []
 
-        // Simulate network delay
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(800))
-            heatZones = Self.generateMockZones(around: coordinate, name: destinationName)
+            try? await Task.sleep(for: .milliseconds(600))
+            heatZones = Self.generateMockZones(
+                around: coordinate,
+                name: destinationName,
+                radiusMeters: radiusMeters
+            )
             isLoading = false
         }
     }
@@ -269,60 +276,70 @@ final class HeatZoneManager {
 
     // MARK: - Mock Data Generation
 
-    /// Generates mock heat zones with block-shaped boundaries around a coordinate.
+    /// Generates color-coded heat zones covering the full walking radius using a hex-grid layout.
+    ///
+    /// One center zone + six surrounding zones tile the entire radius area without gaps.
+    /// Only overview-level surfaces are produced — street-segment and garage/lot layers
+    /// are omitted until real backend geometry is available.
     private static func generateMockZones(
         around center: CLLocationCoordinate2D,
-        name: String
+        name: String,
+        radiusMeters: Double
     ) -> [HeatZone] {
-        // (name, lat offset, lng offset, busy score, template index, rotation, size)
-        let zoneData: [(String, Double, Double, Int, Int, Double, Double)] = [
-            ("\(name) — Core",    0.0,     0.0,     82, 0, 5.0,  180),
-            ("North Block",       0.004,   0.001,   65, 1, -3.0, 160),
-            ("South Side",       -0.004,  -0.0005,  45, 2, 8.0,  200),
-            ("East Quarter",      0.001,   0.005,   73, 3, -5.0, 150),
-            ("West End",         -0.001,  -0.005,   38, 4, 12.0, 170),
-            ("Riverside",        -0.006,   0.003,   55, 5, 0.0,  190),
+        // Zone size chosen so adjacent zones overlap; spacing places surrounding centers
+        // at ~56% of the radius so the hex grid fully covers the circle edge.
+        let spacing = radiusMeters * 0.56
+        let zoneSize = radiusMeters * 0.98
+
+        // (northMeters, eastMeters, busyScore 0–100, blockTemplate, rotationDeg, label)
+        // Hex angles clockwise from north: N=0°, NE=60°, SE=120°, S=180°, SW=240°, NW=300°
+        let s = spacing
+        // Scores aligned with `CurbyConstants.busyScoreOpen` / `busyScoreBusy`: center stays calmer
+        // (typical “destination” hex) so low-traffic periods are not a solid red field.
+        let defs: [(Double, Double, Int, Int, Double, String)] = [
+            (0,          0,           34, 0,   8, "\(name)"),
+            (s,          0,           52, 1,  -5, "North"),
+            (s * 0.5,    s * 0.866,   28, 2,  12, "Northeast"),
+            (-s * 0.5,   s * 0.866,   56, 3, -10, "Southeast"),
+            (-s,         0,           42, 4,   2, "South"),
+            (-s * 0.5,  -s * 0.866,   26, 5,  15, "Southwest"),
+            (s * 0.5,   -s * 0.866,   80, 0,  -7, "Northwest"),
         ]
 
-        return zoneData.map { data in
+        return defs.map { northM, eastM, score, template, rot, label in
             let zoneID = UUID()
-            let zoneCenter = CLLocationCoordinate2D(
-                latitude: center.latitude + data.1,
-                longitude: center.longitude + data.2
+            let zoneCenter = HeatZoneGeometry.offsetCoordinate(
+                from: center,
+                northMeters: northM,
+                eastMeters: eastM
             )
-
             let boundary = HeatZoneGeometry.blockBoundary(
                 center: zoneCenter,
-                sizeMeters: data.6,
-                templateIndex: data.4,
-                rotation: data.5
+                sizeMeters: zoneSize,
+                templateIndex: template,
+                rotation: rot
             )
-
             let spots = generateMockParkingSpots(
                 around: zoneCenter,
-                busyScore: data.3,
-                zoneSizeMeters: data.6
+                busyScore: score,
+                zoneSizeMeters: zoneSize
             )
-
-            let surfaces = generateMockParkingSurfaces(
+            let surface = ParkingSurface(
                 zoneID: zoneID,
-                zoneName: data.0,
-                zoneBusyScore: data.3,
-                zoneRotation: data.5,
-                zoneSizeMeters: data.6,
-                overviewBoundary: boundary,
-                parkingSpots: spots
+                name: label,
+                kind: .overviewArea,
+                busyLevel: BusyLevel(score: score),
+                polygonCoords: boundary
             )
-
             return HeatZone(
                 id: zoneID,
-                name: data.0,
+                name: label,
                 coordinate: zoneCenter,
-                radius: data.6,
-                busyScore: data.3,
+                radius: zoneSize / 2,
+                busyScore: score,
                 parkingSpots: spots,
                 boundaryCoords: boundary,
-                parkingSurfaces: surfaces
+                parkingSurfaces: [surface]
             )
         }
     }
@@ -416,84 +433,4 @@ final class HeatZoneManager {
         return spots
     }
 
-    private static func generateMockParkingSurfaces(
-        zoneID: UUID,
-        zoneName: String,
-        zoneBusyScore: Int,
-        zoneRotation: Double,
-        zoneSizeMeters: Double,
-        overviewBoundary: [CLLocationCoordinate2D],
-        parkingSpots: [ParkingSpot]
-    ) -> [ParkingSurface] {
-        var surfaces: [ParkingSurface] = [
-            ParkingSurface(
-                zoneID: zoneID,
-                name: zoneName,
-                kind: .overviewArea,
-                busyLevel: BusyLevel(score: zoneBusyScore),
-                polygonCoords: overviewBoundary
-            )
-        ]
-
-        var streetSurfaceIndex = 0
-
-        for spot in parkingSpots {
-            switch spot.type {
-            case .streetCurbside, .metered:
-                let segmentLengthFeet = spot.segmentLength ?? 180
-                let segmentLengthMeters = max(28, min(segmentLengthFeet * 0.3048, zoneSizeMeters * 0.7))
-                let alignment = streetSurfaceIndex.isMultiple(of: 2) ? zoneRotation : zoneRotation + 90
-                streetSurfaceIndex += 1
-                let p1 = HeatZoneGeometry.offsetCoordinate(from: spot.coordinate, distanceMeters: -segmentLengthMeters/2.0, bearingDegrees: alignment)
-                let p2 = HeatZoneGeometry.offsetCoordinate(from: spot.coordinate, distanceMeters: segmentLengthMeters/2.0, bearingDegrees: alignment)
-
-                surfaces.append(
-                    ParkingSurface(
-                        zoneID: zoneID,
-                        name: spot.displayName,
-                        kind: .curbSegment,
-                        busyLevel: spot.opennessBusyLevel,
-                        polygonCoords: [p1, p2],
-                        sourceReference: spot.id.uuidString
-                    )
-                )
-
-            case .garage:
-                surfaces.append(
-                    ParkingSurface(
-                        zoneID: zoneID,
-                        name: spot.displayName,
-                        kind: .garageFootprint,
-                        busyLevel: spot.capacityBusyLevel,
-                        polygonCoords: HeatZoneGeometry.rectangleBoundary(
-                            center: spot.coordinate,
-                            lengthMeters: max(30, zoneSizeMeters * 0.26),
-                            widthMeters: max(22, zoneSizeMeters * 0.18),
-                            rotation: zoneRotation
-                        ),
-                        sourceReference: spot.id.uuidString
-                    )
-                )
-
-            case .lot:
-                surfaces.append(
-                    ParkingSurface(
-                        zoneID: zoneID,
-                        name: spot.displayName,
-                        kind: .lotFootprint,
-                        busyLevel: spot.capacityBusyLevel,
-                        polygonCoords: HeatZoneGeometry.rectangleBoundary(
-                            center: spot.coordinate,
-                            lengthMeters: max(28, zoneSizeMeters * 0.24),
-                            widthMeters: max(18, zoneSizeMeters * 0.16),
-                            rotation: zoneRotation + 12
-                        ),
-                        sourceReference: spot.id.uuidString
-                    )
-                )
-            }
-        }
-
-        return surfaces
-    }
 }

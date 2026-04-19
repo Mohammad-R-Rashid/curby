@@ -17,13 +17,18 @@ import SwiftUI
 struct SearchView: View {
 
     @Bindable var searchState: SearchState
-    let heatZoneManager: HeatZoneManager
+    let parkingAreaManager: ParkingAreaManager
+    let parkingSearchManager: ParkingWebSocketManager
+    let parkingEventDetector: ParkingEventDetector
     /// Shown when the map is in free-explore mode (user panned away from follow).
     var showRecenterButton: Bool = false
     var onRecenter: (() -> Void)?
+    var onMarkAsParked: (() -> Void)?
     let onDestinationSelected: (SelectedDestination) -> Void
-    let onZoneSelected: (HeatZone) -> Void
+    let onParkingAreaSelected: (LiveParkingArea) -> Void
     let onClearDestination: () -> Void
+    /// Widen walking geofence when Mapbox returns no POIs in the current radius.
+    var onExpandWalkingRadius: (() -> Void)?
 
     @FocusState private var isSearchFocused: Bool
 
@@ -43,15 +48,34 @@ struct SearchView: View {
                 VStack(spacing: 20) {
                     // Active search results (always priority)
                     if searchState.isSearchActive && !searchState.searchText.isEmpty {
-                        searchResultsSection
+                        activeSearchContent
                     } else if let dest = searchState.selectedDestination {
                         // DESTINATION MODE — destination summary lives in the search bar
-                        navigateButton(dest)
+                        MinimalActionButtonRow(
+                            onNavigate: {
+                                openInMaps(coordinate: dest.coordinate, name: dest.name)
+                            },
+                            onMarkAsParked: parkingSearchManager.activeRecommendation != nil ? { onMarkAsParked?() } : nil,
+                            isParked: parkingEventDetector.presenceState == .parked
+                        )
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 10)
 
-                        if heatZoneManager.isLoading {
-                            loadingIndicator
-                        } else if !heatZoneManager.heatZones.isEmpty {
-                            heatZonesSection
+                        liveParkingSection
+
+                        if parkingAreaManager.isLoading {
+                            areaLoadingIndicator
+                        } else if !parkingAreaManager.areas.isEmpty {
+                            nearbyParkingSection
+                        } else if parkingAreaManager.noParkingInGeofence {
+                            noParkingInRadiusSection
+                        } else if let error = parkingAreaManager.lastErrorMessage {
+                            MinimalStatusCard(
+                                title: "Nearby parking unavailable",
+                                icon: .warningCircle,
+                                tint: CurbyGlass.destinationTint,
+                                detail: error
+                            )
                         }
                     } else {
                         // SEARCH MODE — show places + recents
@@ -66,7 +90,56 @@ struct SearchView: View {
                 }
                 .padding(.top, 16)
             }
+            .scrollDismissesKeyboard(.interactively)
         }
+    }
+
+    @ViewBuilder
+    private var activeSearchContent: some View {
+        let query = searchState.searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if searchState.isSearching && searchState.searchResults.isEmpty {
+            searchLoadingPlaceholder
+        } else if searchState.searchResults.isEmpty {
+            searchEmptyPlaceholder(queryLength: query.count)
+        } else {
+            searchResultsSection
+        }
+    }
+
+    private var searchLoadingPlaceholder: some View {
+        VStack(spacing: 14) {
+            ProgressView()
+                .tint(CurbyGlass.primaryTint)
+                .scaleEffect(1.05)
+            Text("Searching places…")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 36)
+        .curbyGlassSurface(cornerRadius: 18)
+        .padding(.horizontal, 16)
+    }
+
+    private func searchEmptyPlaceholder(queryLength: Int) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(queryLength < 2 ? "Keep typing" : "No matches in this area")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.primary)
+
+            Text(
+                queryLength < 2
+                    ? "Enter at least two characters to search streets, places, and businesses."
+                    : "Try a street name, neighborhood, business, or landmark. Results are limited to the greater Austin area Curby covers."
+            )
+            .font(.system(size: 14))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .curbyGlassSurface(cornerRadius: 18)
+        .padding(.horizontal, 16)
     }
 
     // MARK: - Search Bar (Liquid Glass)
@@ -99,14 +172,8 @@ struct SearchView: View {
 
                         Spacer(minLength: 8)
 
-                        if showRecenterButton {
-                            barAccessoryButton(
-                                icon: .crosshairSimple,
-                                tint: CurbyGlass.primaryTint,
-                                accessibilityLabel: "Recenter map on your location"
-                            ) {
-                                onRecenter?()
-                            }
+                        if showRecenterInDestinationBar {
+                            destinationRecenterButton
                         }
 
                         barAccessoryButton(
@@ -123,6 +190,10 @@ struct SearchView: View {
                     TextField("Where to?", text: $searchState.searchText)
                         .font(.system(size: 17))
                         .focused($isSearchFocused)
+                        .submitLabel(.search)
+                        .onSubmit {
+                            searchState.onSearchTextChanged()
+                        }
                         .onChange(of: searchState.searchText) { _, _ in
                             searchState.isSearchActive = true
                             searchState.onSearchTextChanged()
@@ -163,97 +234,129 @@ struct SearchView: View {
         }
     }
 
-    // MARK: - Navigate Button (Liquid Glass)
+    /// After a destination is pinned in the sheet, always offer “snap back to me” with a standard location icon.
+    private var showRecenterInDestinationBar: Bool {
+        showRecenterButton || (searchState.selectedDestination != nil && !searchState.isSearchActive)
+    }
 
-    private func navigateButton(_ dest: SelectedDestination) -> some View {
+    private var destinationRecenterButton: some View {
         Button {
-            openInMaps(coordinate: dest.coordinate, name: dest.name)
+            CurbyHaptics.light()
+            onRecenter?()
         } label: {
-            HStack(spacing: 8) {
-                Ph.navigationArrow.fill
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 18, height: 18)
-
-                Text("Navigate")
-                    .font(.system(size: 17, weight: .semibold))
-            }
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity)
-            .frame(height: 52)
+            Image(systemName: "location.circle.fill")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(CurbyGlass.primaryTint)
+                .frame(width: 32, height: 32)
+                .contentShape(.circle)
         }
-        .buttonStyle(.glassProminent)
-        .tint(CurbyGlass.primaryTint)
-        .padding(.horizontal, 16)
+        .buttonStyle(.plain)
+        .accessibilityLabel("Recenter map on your location")
     }
 
     // MARK: - Search Results
 
     private var searchResultsSection: some View {
-        VStack(spacing: 2) {
-            ForEach(searchState.searchResults) { result in
-                Button {
-                    searchState.selectDestination(
-                        name: result.name,
-                        subtitle: result.subtitle,
-                        coordinate: result.coordinate
-                    )
-                    if let dest = searchState.selectedDestination {
-                        onDestinationSelected(dest)
-                    }
-                    isSearchFocused = false
-                } label: {
-                    HStack(spacing: 12) {
-                        ZStack {
-                            Circle()
-                                .fill(CurbyGlass.primaryTint.opacity(0.16))
-                                .frame(width: 36, height: 36)
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Search results")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
 
-                            Ph.mapPin.fill
+            VStack(spacing: 2) {
+                ForEach(searchState.searchResults) { result in
+                    Button {
+                        CurbyHaptics.selection()
+                        searchState.selectDestination(
+                            name: result.name,
+                            subtitle: result.subtitle,
+                            coordinate: result.coordinate
+                        )
+                        if let dest = searchState.selectedDestination {
+                            onDestinationSelected(dest)
+                        }
+                        isSearchFocused = false
+                    } label: {
+                        HStack(spacing: 12) {
+                            ZStack {
+                                Circle()
+                                    .fill(CurbyGlass.primaryTint.opacity(0.16))
+                                    .frame(width: 36, height: 36)
+
+                                Ph.mapPin.fill
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .foregroundStyle(CurbyGlass.primaryTint)
+                                    .frame(width: 15, height: 15)
+                            }
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(result.name)
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundStyle(.primary)
+                                    .multilineTextAlignment(.leading)
+
+                                Text(result.subtitle)
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.leading)
+                            }
+
+                            Spacer(minLength: 8)
+
+                            Ph.caretRight.bold
                                 .resizable()
                                 .aspectRatio(contentMode: .fit)
-                                .foregroundStyle(CurbyGlass.primaryTint)
-                                .frame(width: 15, height: 15)
+                                .foregroundStyle(.tertiary)
+                                .frame(width: 11, height: 11)
                         }
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(result.name)
-                                .font(.system(size: 15, weight: .medium))
-                                .foregroundStyle(.primary)
-
-                            Text(result.subtitle)
-                                .font(.system(size: 13))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-
-                        Spacer()
-
-                        Ph.caretRight.bold
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .foregroundStyle(.tertiary)
-                            .frame(width: 11, height: 11)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .contentShape(Rectangle())
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
+                    .buttonStyle(.plain)
+
+                    if result.id != searchState.searchResults.last?.id {
+                        Divider()
+                            .opacity(0.35)
+                            .padding(.leading, 64)
+                    }
                 }
             }
+            .curbyGlassSurface(cornerRadius: 18)
+
+            Text("Data © OpenStreetMap contributors")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal, 6)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 6)
-        .curbyGlassSurface(cornerRadius: 18)
         .padding(.horizontal, 16)
     }
 
-    // MARK: - Heat Zones Section
+    // MARK: - Nearby Parking Section
 
-    private var loadingIndicator: some View {
+    private var noParkingInRadiusSection: some View {
+        let step = CurbyConstants.parkingSearchRadiusExpandStepMiles
+        let canExpand = OnboardingState.canAddWalkingCircumferenceMiles(step)
+
+        return VStack(alignment: .leading, spacing: 12) {
+            MinimalStatusCard(
+                title: "No nearby parking",
+                icon: .warningCircle,
+                tint: CurbyGlass.destinationTint,
+                actionTitle: canExpand ? "Expand search" : nil,
+                action: canExpand ? { onExpandWalkingRadius?() } : nil
+            )
+        }
+    }
+
+    private var areaLoadingIndicator: some View {
         HStack(spacing: 8) {
             ProgressView()
                 .tint(CurbyGlass.primaryTint)
                 .scaleEffect(0.7)
-            Text("Finding parking zones…")
+            Text("Loading nearby parking…")
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
         }
@@ -263,16 +366,68 @@ struct SearchView: View {
         .padding(.horizontal, 16)
     }
 
-    private var heatZonesSection: some View {
+    private var nearbyParkingSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             sectionHeader(title: "Parking Zones", icon: .mapPinArea)
+            geofenceSummaryCard
+
+            if !parkingAreaManager.streetAreas.isEmpty {
+                parkingAreaGroup(
+                    title: "Street Parking",
+                    icon: .roadHorizon,
+                    areas: parkingAreaManager.streetAreas
+                )
+            }
+
+            if !parkingAreaManager.structureAreas.isEmpty {
+                parkingAreaGroup(
+                    title: "Garages & Lots",
+                    icon: .garage,
+                    areas: parkingAreaManager.structureAreas
+                )
+            }
+        }
+    }
+
+    private var geofenceSummaryCard: some View {
+        HStack {
+            Ph.circleDashed.fill
+                .resizable()
+                .frame(width: 16, height: 16)
+                .foregroundStyle(CurbyGlass.primaryTint)
+            Text("\(parkingAreaManager.areas.count) options inside \(parkingAreaManager.geofenceDistanceText)")
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 16)
+    }
+
+    private func parkingAreaGroup(
+        title: String,
+        icon: Ph,
+        areas: [LiveParkingArea]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                icon.bold
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .foregroundStyle(pinTint(for: areas.first ?? parkingAreaManager.areas.first ?? fallbackArea))
+                    .frame(width: 14, height: 14)
+
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.primary)
+            }
+            .padding(.horizontal, 16)
 
             VStack(spacing: 8) {
-                ForEach(heatZoneManager.heatZones) { zone in
+                ForEach(areas) { area in
                     Button {
-                        onZoneSelected(zone)
+                        CurbyHaptics.selection()
+                        onParkingAreaSelected(area)
                     } label: {
-                        zoneCard(zone)
+                        nearbyParkingCard(area)
                     }
                 }
             }
@@ -280,21 +435,108 @@ struct SearchView: View {
         }
     }
 
-    private func zoneCard(_ zone: HeatZone) -> some View {
+    private var liveParkingSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader(title: "Live Parking", icon: .navigationArrow)
+
+            if parkingSearchManager.isSearching {
+                MinimalStatusCard(
+                    title: "Searching...",
+                    icon: .spinnerGap,
+                    tint: CurbyGlass.primaryTint
+                )
+            }
+
+            if case .noData(_) = parkingSearchManager.status {
+                MinimalStatusCard(
+                    title: "No route available",
+                    icon: .warningCircle,
+                    tint: CurbyGlass.warningTint
+                )
+            }
+
+            if case .error(_) = parkingSearchManager.status {
+                MinimalStatusCard(
+                    title: "Connection issue",
+                    icon: .wifiX,
+                    tint: CurbyGlass.destinationTint,
+                    actionTitle: "Retry"
+                ) {
+                    Task { await parkingSearchManager.retryCurrentSearch() }
+                }
+            }
+            
+            if case .arrived = parkingSearchManager.status {
+                MinimalStatusCard(
+                    title: "Arrived",
+                    icon: .checkCircle,
+                    tint: CurbyGlass.successTint
+                )
+            }
+
+            if let recommendation = parkingSearchManager.activeRecommendation {
+                UnifiedRecommendationCard(
+                    recommendation: recommendation,
+                    isParked: parkingEventDetector.presenceState == .parked,
+                    onNavigate: {
+                        openInMaps(
+                            coordinate: recommendation.area.coordinate,
+                            name: recommendation.area.name
+                        )
+                    },
+                    onCancel: {
+                        Task { await parkingSearchManager.cancelSearch() }
+                    },
+                    onRetry: {
+                        Task { await parkingSearchManager.retryCurrentSearch() }
+                    }
+                )
+            }
+
+            if let pendingUpdate = parkingSearchManager.pendingRouteUpdate {
+                VStack(spacing: 8) {
+                    MinimalStatusCard(
+                        title: "Better parking found",
+                        icon: .sparkle,
+                        tint: CurbyGlass.warningTint,
+                        actionTitle: "Switch"
+                    ) {
+                        Task { await parkingSearchManager.acceptPendingUpdate() }
+                    }
+                }
+            }
+        }
+    }
+
+    private func nearbyParkingCard(_ area: LiveParkingArea) -> some View {
         HStack(spacing: 14) {
-            // Busy level color bar
-            RoundedRectangle(cornerRadius: 3)
-                .fill(HeatZoneGeometry.color(for: zone.busyLevel))
-                .frame(width: 4, height: 48)
+            ZStack {
+                Circle()
+                    .fill(pinTint(for: area).opacity(0.18))
+                    .frame(width: 38, height: 38)
+
+                pinIcon(for: area).fill
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .foregroundStyle(pinTint(for: area))
+                    .frame(width: 18, height: 18)
+            }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(zone.name)
+                Text(area.displayName)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
 
+                if let subtitle = area.subtitleText {
+                    Text(subtitle)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
                 HStack(spacing: 8) {
-                    Text("\(zone.parkingSpots.count) spots")
+                    Text(kindLabel(for: area))
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
 
@@ -302,23 +544,22 @@ struct SearchView: View {
                         .foregroundStyle(.tertiary)
                         .font(.system(size: 10))
 
-                    Text("Score: \(zone.busyScore)")
+                    Text(area.distanceText)
                         .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundStyle(HeatZoneGeometry.color(for: zone.busyLevel))
+                        .foregroundStyle(pinTint(for: area))
                 }
             }
 
             Spacer()
 
-            // Badge
-            Text(zone.busyLevel.label)
+            Text(kindLabel(for: area))
                 .font(.system(size: 11, weight: .bold, design: .rounded))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .background(
                     Capsule()
-                        .fill(HeatZoneGeometry.color(for: zone.busyLevel))
+                        .fill(pinTint(for: area))
                 )
 
             Ph.caretRight.bold
@@ -329,7 +570,7 @@ struct SearchView: View {
         }
         .padding(14)
         .curbyGlassSurface(
-            tint: HeatZoneGeometry.color(for: zone.busyLevel),
+            tint: pinTint(for: area),
             cornerRadius: CurbyGlass.compactCornerRadius
         )
     }
@@ -344,6 +585,7 @@ struct SearchView: View {
                 HStack(spacing: 16) {
                     ForEach(PopularLocation.austinLocations) { location in
                         Button {
+                            CurbyHaptics.selection()
                             searchState.selectDestination(
                                 name: location.name,
                                 subtitle: location.subtitle,
@@ -400,6 +642,7 @@ struct SearchView: View {
             VStack(spacing: 2) {
                 ForEach(searchState.recentDestinations) { recent in
                     Button {
+                        CurbyHaptics.selection()
                         searchState.selectDestination(
                             name: recent.name,
                             subtitle: recent.subtitle,
@@ -461,7 +704,10 @@ struct SearchView: View {
         accessibilityLabel: String,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
+        Button {
+            CurbyHaptics.selection()
+            action()
+        } label: {
             icon.bold
                 .resizable()
                 .aspectRatio(contentMode: .fit)
@@ -497,7 +743,66 @@ struct SearchView: View {
         .padding(.horizontal, 16)
     }
 
+    private func pinIcon(for area: LiveParkingArea) -> Ph {
+        switch area.kind {
+        case .garage:
+            return .garage
+        case .lot:
+            return .park
+        case .street:
+            return .roadHorizon
+        case .general:
+            return .mapPinArea
+        }
+    }
+
+    private func pinTint(for area: LiveParkingArea) -> Color {
+        switch area.kind {
+        case .garage:
+            return CurbyGlass.primaryTint
+        case .lot:
+            return CurbyGlass.warningTint
+        case .street:
+            return CurbyGlass.successTint
+        case .general:
+            return CurbyGlass.destinationTint
+        }
+    }
+
+    private func kindLabel(for area: LiveParkingArea) -> String {
+        switch area.kind {
+        case .garage:
+            return "Garage"
+        case .lot:
+            return "Lot"
+        case .street:
+            return "Street"
+        case .general:
+            return "Parking"
+        }
+    }
+
+    private var fallbackArea: LiveParkingArea {
+        LiveParkingArea(
+            id: "fallback",
+            name: "Parking",
+            coordinate: CurbyConstants.defaultCoordinate,
+            navigationCoordinate: CurbyConstants.defaultCoordinate,
+            address: "",
+            fullAddress: "",
+            placeFormatted: "",
+            phone: nil,
+            website: nil,
+            openHoursText: [],
+            categoryIDs: [],
+            distanceMeters: nil,
+            destinationDistanceMeters: nil,
+            kind: .general
+        )
+    }
+
     private func openInMaps(coordinate: CLLocationCoordinate2D, name: String) {
+        CurbyHaptics.light()
         let placemark = MKPlacemark(coordinate: coordinate)
         let mapItem = MKMapItem(placemark: placemark)
         mapItem.name = name
@@ -510,13 +815,27 @@ struct SearchView: View {
 // MARK: - Preview
 
 #Preview {
+    let apiClient = CurbyAPIClient()
+    let remoteConfig = RemoteConfigService(apiClient: apiClient)
+    let parkingSearchManager = ParkingWebSocketManager(
+        apiClient: apiClient,
+        remoteConfigService: remoteConfig
+    )
+    let parkingEventDetector = ParkingEventDetector(
+        apiClient: apiClient,
+        remoteConfigService: remoteConfig
+    )
+
     SearchView(
         searchState: SearchState(),
-        heatZoneManager: HeatZoneManager(),
+        parkingAreaManager: ParkingAreaManager(),
+        parkingSearchManager: parkingSearchManager,
+        parkingEventDetector: parkingEventDetector,
         showRecenterButton: true,
         onRecenter: {},
+        onMarkAsParked: {},
         onDestinationSelected: { _ in },
-        onZoneSelected: { _ in },
+        onParkingAreaSelected: { _ in },
         onClearDestination: { }
     )
 }

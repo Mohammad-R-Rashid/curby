@@ -20,7 +20,7 @@ struct RecenterButton: View {
 
     var body: some View {
         Button {
-            triggerHaptic()
+            CurbyHaptics.medium()
             action()
         } label: {
             Ph.crosshairSimple.bold
@@ -64,12 +64,6 @@ struct RecenterButton: View {
         .accessibilityIdentifier("recenter_button")
     }
 
-    // MARK: - Haptics
-
-    private func triggerHaptic() {
-        let generator = UIImpactFeedbackGenerator(style: .medium)
-        generator.impactOccurred()
-    }
 }
 
 // MARK: - Preview

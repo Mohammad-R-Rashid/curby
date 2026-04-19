@@ -5,6 +5,7 @@
 // Workers read from KV; iOS app fetches via GET /v1/config.
 
 export interface CurbyRemoteConfig {
+  /** Bump when schema changes; clients may use for cache invalidation. */
   version: number;
 
   detection: {
@@ -20,8 +21,10 @@ export interface CurbyRemoteConfig {
       availability: number;
       turnover: number;
       travelTime: number;
+      congestion: number;
       walkDistance: number;
       loadBalance: number;
+      confidence: number;
     };
     estimatedCapacityPerArea: number;
     recentDepartureWindowMin: number;
@@ -39,6 +42,18 @@ export interface CurbyRemoteConfig {
     maxRadiusMeters: number;
     maxCandidates: number;
     occupancyRadiusMeters: number;
+    /**
+     * When true (default), the region coordinator merges OSM Overpass parking
+     * features with Mapbox Search POIs before scoring (better street coverage).
+     */
+    osmCompanionSearch?: boolean;
+    /** Overpass `api/interpreter` URL (POST, form field `data=`). Public default is overpass-api.de. */
+    overpassInterpreterUrl?: string;
+    /**
+     * Max time to wait for Overpass before scoring Mapbox-only (ms).
+     * Public Overpass is slow; keep this low so recommendations stay snappy.
+     */
+    osmFetchTimeoutMs?: number;
   };
 
   telemetry: {
@@ -49,7 +64,7 @@ export interface CurbyRemoteConfig {
 
 /** Default configuration — used as fallback if KV is empty. */
 export const DEFAULT_CONFIG: CurbyRemoteConfig = {
-  version: 1,
+  version: 4,
 
   detection: {
     parkDetectionDurationSec: 120,
@@ -61,11 +76,13 @@ export const DEFAULT_CONFIG: CurbyRemoteConfig = {
 
   algorithm: {
     weights: {
-      availability: 0.35,
-      turnover: 0.15,
-      travelTime: 0.25,
-      walkDistance: 0.15,
-      loadBalance: 0.10,
+      availability: 0.28,
+      turnover: 0.10,
+      travelTime: 0.24,
+      congestion: 0.18,
+      walkDistance: 0.10,
+      loadBalance: 0.05,
+      confidence: 0.05,
     },
     estimatedCapacityPerArea: 50,
     recentDepartureWindowMin: 15,
@@ -83,6 +100,9 @@ export const DEFAULT_CONFIG: CurbyRemoteConfig = {
     maxRadiusMeters: 5000,
     maxCandidates: 9,
     occupancyRadiusMeters: 200,
+    osmCompanionSearch: true,
+    overpassInterpreterUrl: 'https://overpass-api.de/api/interpreter',
+    osmFetchTimeoutMs: 1500,
   },
 
   telemetry: {
@@ -114,8 +134,20 @@ export async function getConfig(kv: KVNamespace): Promise<CurbyRemoteConfig> {
 
   try {
     const raw = await kv.get('app_config', { type: 'json' });
-    if (raw) {
-      cachedConfig = raw as CurbyRemoteConfig;
+    if (raw && typeof raw === 'object') {
+      const r = raw as Partial<CurbyRemoteConfig>;
+      cachedConfig = {
+        ...DEFAULT_CONFIG,
+        ...r,
+        detection: { ...DEFAULT_CONFIG.detection, ...r.detection },
+        algorithm: {
+          ...DEFAULT_CONFIG.algorithm,
+          ...r.algorithm,
+          weights: { ...DEFAULT_CONFIG.algorithm.weights, ...r.algorithm?.weights },
+        },
+        search: { ...DEFAULT_CONFIG.search, ...r.search },
+        telemetry: { ...DEFAULT_CONFIG.telemetry, ...r.telemetry },
+      };
       cacheTimestamp = now;
       return cachedConfig;
     }

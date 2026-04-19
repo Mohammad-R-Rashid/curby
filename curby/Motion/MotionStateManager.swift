@@ -48,11 +48,13 @@ final class MotionStateManager {
     private var candidateState: MotionState = .stationary
     private var candidateTimestamp: Date = .now
     private let locationService: LocationService
+    private let remoteConfigService: RemoteConfigService?
 
     // MARK: - Init
 
-    init(locationService: LocationService) {
+    init(locationService: LocationService, remoteConfigService: RemoteConfigService? = nil) {
         self.locationService = locationService
+        self.remoteConfigService = remoteConfigService
     }
 
     // MARK: - Update
@@ -60,7 +62,7 @@ final class MotionStateManager {
     /// Call this on each location update to re-evaluate motion state.
     func update() {
         let speed = locationService.currentSpeed
-        let rawState = Self.classify(speed: speed)
+        let rawState = classify(speed: speed)
 
         if rawState == motionState {
             // Already in this state — reset candidate
@@ -84,12 +86,16 @@ final class MotionStateManager {
 
     // MARK: - Classification
 
-    /// Instant classification without hysteresis (internal).
-    private static func classify(speed: Double) -> MotionState {
+    private func classify(speed: Double) -> MotionState {
+        let stationaryThreshold = remoteConfigService?.config.detection.speedStationaryMs
+            ?? CurbyConstants.speedStationary
+        let walkingThreshold = remoteConfigService?.config.detection.speedWalkingMs
+            ?? CurbyConstants.speedWalking
+
         switch speed {
-        case ..<CurbyConstants.speedStationary:
+        case ..<stationaryThreshold:
             return .stationary
-        case CurbyConstants.speedStationary ..< CurbyConstants.speedWalking:
+        case stationaryThreshold ..< walkingThreshold:
             return .walking
         default:
             return .driving

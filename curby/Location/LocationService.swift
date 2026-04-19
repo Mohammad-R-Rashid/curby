@@ -13,6 +13,10 @@ import Observation
 ///
 /// This service runs alongside Mapbox's internal location provider — it does NOT
 /// replace it. Mapbox handles puck rendering; this feeds our camera + motion systems.
+///
+/// `CLLocationManagerDelegate` is invoked on an arbitrary queue; all published state
+/// is updated on the main actor only.
+@MainActor
 @Observable
 final class LocationService: NSObject {
 
@@ -77,9 +81,10 @@ final class LocationService: NSObject {
 
     private func configureLocationManager() {
         locationManager.delegate = self
-        locationManager.desiredAccuracy = kCLLocationAccuracyBest
+        locationManager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
         locationManager.activityType = .automotiveNavigation
         locationManager.distanceFilter = kCLDistanceFilterNone // High-frequency
+        locationManager.pausesLocationUpdatesAutomatically = false
         // Background updates enabled dynamically when Always is granted.
         locationManager.allowsBackgroundLocationUpdates = false
         locationManager.showsBackgroundLocationIndicator = false
@@ -99,14 +104,15 @@ extension LocationService: CLLocationManagerDelegate {
     ) {
         guard let latest = locations.last else { return }
 
-        MainActor.assumeIsolated {
-            currentLocation = latest
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.currentLocation = latest
             // CLLocation.speed can be negative when invalid
-            currentSpeed = max(0, latest.speed)
-            horizontalAccuracy = latest.horizontalAccuracy
+            self.currentSpeed = max(0, latest.speed)
+            self.horizontalAccuracy = latest.horizontalAccuracy
 
-            if !hasInitialFix && latest.horizontalAccuracy >= 0 {
-                hasInitialFix = true
+            if !self.hasInitialFix && latest.horizontalAccuracy >= 0 {
+                self.hasInitialFix = true
             }
         }
     }
@@ -115,28 +121,30 @@ extension LocationService: CLLocationManagerDelegate {
         _ manager: CLLocationManager,
         didUpdateHeading newHeading: CLHeading
     ) {
-        MainActor.assumeIsolated {
-            currentHeading = newHeading
+        Task { @MainActor [weak self] in
+            self?.currentHeading = newHeading
         }
     }
 
     nonisolated func locationManagerDidChangeAuthorization(
         _ manager: CLLocationManager
     ) {
-        MainActor.assumeIsolated {
-            authorizationStatus = manager.authorizationStatus
+        let status = manager.authorizationStatus
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.authorizationStatus = status
 
-            switch manager.authorizationStatus {
+            switch status {
             case .authorizedAlways:
-                locationManager.allowsBackgroundLocationUpdates = true
-                locationManager.showsBackgroundLocationIndicator = true
-                startUpdating()
+                self.locationManager.allowsBackgroundLocationUpdates = true
+                self.locationManager.showsBackgroundLocationIndicator = true
+                self.startUpdating()
             case .authorizedWhenInUse:
-                locationManager.allowsBackgroundLocationUpdates = false
-                locationManager.showsBackgroundLocationIndicator = false
-                startUpdating()
+                self.locationManager.allowsBackgroundLocationUpdates = false
+                self.locationManager.showsBackgroundLocationIndicator = false
+                self.startUpdating()
             case .denied, .restricted:
-                stopUpdating()
+                self.stopUpdating()
             case .notDetermined:
                 break
             @unknown default:

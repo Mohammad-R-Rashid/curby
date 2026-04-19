@@ -22,6 +22,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>MBXAccessToken</key>
 	<string>pk.eyJ1IjoiY29kZW9saXZlNzMzNyIsImEiOiJjbW80bnoyYXAxZ2RtMnRvZjIzZmVweHBqIn0.o1460B_12pz6qaH1s49QNA</string>
+	<key>CurbyAPIBaseURL</key>
+	<string>https://curby-api.mohammad-rashid7337.workers.dev</string>
 	<key>NSLocationTemporaryUsageDescriptionDictionary</key>
 	<dict>
 		<key>LocationAccuracyAuthorizationDescription</key>
@@ -43,7 +45,14 @@
 		<dict/>
 	</dict>
 	<key>UILaunchScreen</key>
-	<dict/>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchScreenBackground</string>
+		<key>UIImageName</key>
+		<string>LaunchLogo</string>
+		<key>UIImageRespectsSafeAreaInsets</key>
+		<true/>
+	</dict>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

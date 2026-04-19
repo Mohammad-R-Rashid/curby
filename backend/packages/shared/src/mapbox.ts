@@ -4,8 +4,20 @@
 // Wraps Search Box, Matrix, and Directions APIs.
 
 import type { MapboxParkingArea, MapboxDirectionsResult, LatLng, GeoJSONLineString } from './types.js';
+import { AUSTIN_BBOX, distanceMeters, isWithinAustinArea } from './geo.js';
 
 const MAPBOX_BASE = 'https://api.mapbox.com';
+
+function classifyParkingCategory(name: string): string {
+  const normalized = name.trim().toLowerCase();
+
+  if (normalized.includes('garage')) return 'parking_garage';
+  if (normalized.includes('lot') || normalized.includes('surface')) return 'parking_lot';
+  if (normalized.includes('meter') || normalized.includes('street') || normalized.includes('curb')) {
+    return 'parking_meter';
+  }
+  return 'parking';
+}
 
 /**
  * Search for parking areas near a location using Mapbox Search Box API.
@@ -16,17 +28,23 @@ export async function searchParkingAreas(
   limit: number,
   accessToken: string,
 ): Promise<MapboxParkingArea[]> {
-  // NOTE: Search Box category API does not have a 'radius' parameter.
-  // It uses 'proximity' to bias results near a location.
-  // We cap limit at 9 because Matrix API (driving-traffic) only supports
-  // 10 total coordinates (1 origin + 9 destinations).
+  if (!isWithinAustinArea(destination)) {
+    return [];
+  }
+
+  // Search Box category uses `proximity` as a bias, so we fetch a wider
+  // candidate set first and then enforce Curby's walking geofence locally.
+  // Matrix API still caps the final candidate set at 9 destinations.
   const effectiveLimit = Math.min(limit, 9);
+  const searchLimit = 25;
 
   const url = new URL(`${MAPBOX_BASE}/search/searchbox/v1/category/parking`);
   url.searchParams.set('proximity', `${destination.lng},${destination.lat}`);
-  url.searchParams.set('limit', String(effectiveLimit));
+  url.searchParams.set('limit', String(searchLimit));
   url.searchParams.set('access_token', accessToken);
   url.searchParams.set('language', 'en');
+  url.searchParams.set('country', 'US');
+  url.searchParams.set('bbox', AUSTIN_BBOX);
 
   const res = await fetch(url.toString());
   if (!res.ok) {
@@ -40,12 +58,22 @@ export async function searchParkingAreas(
     }>;
   };
 
-  return data.features.map((f) => ({
-    id: f.properties.mapbox_id,
-    name: f.properties.name || 'Parking',
-    center: { lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0] },
-    category: f.properties.feature_type || 'parking',
-  }));
+  return data.features
+    .map((f) => ({
+      id: f.properties.mapbox_id,
+      name: f.properties.name || 'Parking',
+      center: { lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0] },
+      category: classifyParkingCategory(f.properties.name || 'Parking'),
+      dataSource: 'mapbox' as const,
+      destinationDistanceMeters: distanceMeters(
+        destination,
+        { lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0] },
+      ),
+    }))
+    .filter((area) => area.destinationDistanceMeters <= radiusMeters + 25)
+    .sort((lhs, rhs) => lhs.destinationDistanceMeters - rhs.destinationDistanceMeters)
+    .slice(0, effectiveLimit)
+    .map(({ destinationDistanceMeters: _distance, ...area }) => area);
 }
 
 /**

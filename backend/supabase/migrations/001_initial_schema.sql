@@ -263,7 +263,7 @@ BEGIN
     geohash = p_geohash,
     parked_at = p_parked_at;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 -- Insert a parking event (park or depart)
 CREATE OR REPLACE FUNCTION insert_parking_event(
@@ -285,7 +285,7 @@ BEGIN
     p_recorded_at
   );
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 -- Handle a depart event: delete from active_parks + log to parking_events
 -- Implemented with DELETE…RETURNING in a CTE (no geometry/text DECLARE vars) so
@@ -313,7 +313,7 @@ BEGIN
     RAISE EXCEPTION 'No active park not found for user %', p_user_id;
   END IF;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 -- Insert a routing session (called from session-consumer)
 CREATE OR REPLACE FUNCTION insert_routing_session(
@@ -347,7 +347,7 @@ BEGIN
     'active'
   );
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 -- ============================================================
 -- Row-Level Security
@@ -379,3 +379,21 @@ CREATE POLICY "routing_sessions_read" ON routing_sessions
 CREATE POLICY "routing_sessions_write" ON routing_sessions
   FOR ALL USING (true) WITH CHECK (true);
 
+-- RPC execution: API workers call these with the service role key.
+REVOKE ALL ON FUNCTION upsert_active_park(uuid, double precision, double precision, text, timestamptz)
+  FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION insert_parking_event(uuid, text, double precision, double precision, text, timestamptz)
+  FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION handle_depart(uuid, timestamptz)
+  FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION insert_routing_session(uuid, uuid, double precision, double precision, integer, jsonb, jsonb, jsonb, integer, real)
+  FROM PUBLIC, anon, authenticated;
+
+GRANT EXECUTE ON FUNCTION upsert_active_park(uuid, double precision, double precision, text, timestamptz)
+  TO service_role;
+GRANT EXECUTE ON FUNCTION insert_parking_event(uuid, text, double precision, double precision, text, timestamptz)
+  TO service_role;
+GRANT EXECUTE ON FUNCTION handle_depart(uuid, timestamptz)
+  TO service_role;
+GRANT EXECUTE ON FUNCTION insert_routing_session(uuid, uuid, double precision, double precision, integer, jsonb, jsonb, jsonb, integer, real)
+  TO service_role;
