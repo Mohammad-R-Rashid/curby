@@ -19,13 +19,13 @@ const DEST_LNG = -97.7427951;
 
 function getDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
   const R = 6371e3; // metres
-  const φ1 = lat1 * Math.PI/180;
-  const φ2 = lat2 * Math.PI/180;
-  const Δφ = (lat2-lat1) * Math.PI/180;
-  const Δλ = (lon2-lon1) * Math.PI/180;
-  const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ/2) * Math.sin(Δλ/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  return R * c; 
+  const φ1 = lat1 * Math.PI / 180;
+  const φ2 = lat2 * Math.PI / 180;
+  const Δφ = (lat2 - lat1) * Math.PI / 180;
+  const Δλ = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
 }
 
 async function fetchAustinEntrances() {
@@ -45,7 +45,7 @@ async function fetchAustinEntrances() {
     if (!lat || !lng) continue;
 
     const distMeters = getDistance(DEST_LAT, DEST_LNG, lat, lng);
-    
+
     // We fall back to 3000m directly here since 1000m only found 1 last time!
     if (distMeters <= 3000 && !uniqueLots.has(entry.parking_lo)) {
       uniqueLots.add(entry.parking_lo);
@@ -66,14 +66,14 @@ async function fetchDirectionsWithLiveTraffic(destLng: number, destLat: number) 
   // Using Directions API instead of Matrix to get Deep Traffic Details
   const coords = `${USER_LNG},${USER_LAT};${destLng},${destLat}`;
   const url = `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${coords}?annotations=duration,distance,congestion_numeric&overview=full&access_token=${MAPBOX_TOKEN}`;
-  
+
   const res = await fetch(url);
   const data = await res.json();
-  
+
   if (data.code !== 'Ok') throw new Error(`Mapbox Error: ${data.message}`);
 
   const route = data.routes[0];
-  
+
   return {
     liveDurationSec: route.duration,
     historicalDurationSec: route.duration_typical,
@@ -102,7 +102,7 @@ async function run() {
     const trafficDataArray = await Promise.all(
       entrances.map(e => fetchDirectionsWithLiveTraffic(e.lng, e.lat))
     );
-    
+
     // Assemble Parking Candidates
     const candidates: ParkingCandidate[] = entrances.map((e: any, idx: number) => {
       const traffic = trafficDataArray[idx];
@@ -116,25 +116,25 @@ async function run() {
           category: 'parking_entrance'
         },
         traffic: {
-           // We explicitly insert LIVE traffic duration into the algorithm here!
+          // We explicitly insert LIVE traffic duration into the algorithm here!
           travelTimeMin: traffic.liveDurationSec / 60,
           distanceMeters: traffic.distanceM,
           walkTimeMin: walkTimeMin,
         },
         occupancy: {
           // Neutral Mocked Occupancy for pure routing scoring
-          parkedCount: 50, 
+          parkedCount: 50,
           recentDepartures: 5,
           departureRate: 0.1,
           arrivalRate: 0.1,
           parkDurations: [60],
-          recentUniqueUsers: 50, 
+          recentUniqueUsers: 50,
         }
       };
     });
 
     console.log(`\n🧠 Running 5-Factor Score Algorithm...`);
-    
+
     // Override configuration to completely disable Availability and Turnover!
     // Since our algorithm mathematically normalizes weights to sum to 1.0, 
     // setting these to 0.0 will dynamically shift 100% of the scoring power
@@ -144,12 +144,12 @@ async function run() {
     dynamicConfig.weights.turnover = 0.0;
 
     const ranked = scoreAllAreas(candidates, new Map<string, number>(), dynamicConfig);
-    
+
     console.log(`\n🏆 Best Routes Ranked by Mapbox Live Traffic + Walk Prox:\n`);
     ranked.forEach((r, idx) => {
       const garage = candidates.find(c => c.area.id === r.areaId)!;
       const tData = trafficDataArray.find((_, tIdx) => entrances[tIdx].id === garage.area.id)!;
-      
+
       console.log(`${idx + 1}. Austin ${garage.area.name} (Alg Score: ${(r.score * 100).toFixed(1)}/100)`);
       if (tData.delayMin > 0) {
         console.log(`   └─ 🚗 Live Drive Time: ${garage.traffic.travelTimeMin.toFixed(1)} mins (⚠️ +${tData.delayMin.toFixed(1)} min traffic delay)`);
@@ -157,7 +157,7 @@ async function run() {
         console.log(`   └─ 🚗 Live Drive Time: ${garage.traffic.travelTimeMin.toFixed(1)} mins (🟢 Clear traffic, -${Math.abs(tData.delayMin).toFixed(1)} min fast!)`);
       }
       console.log(`   └─ 🚶 Walk to Union:   ${garage.traffic.walkTimeMin.toFixed(1)} mins`);
-      
+
       // Clean up the algorithmic reasoning string to strip out availability/turnover chatter
       let cleanReasoning = r.reasoning
         .replace(/.*?availability.*?,\s*/g, '')

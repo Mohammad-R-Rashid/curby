@@ -16,7 +16,6 @@ import SwiftUI
 struct HeatZoneDetailView: View {
 
     let zone: HeatZone
-    let destinationName: String
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
@@ -59,8 +58,7 @@ struct HeatZoneDetailView: View {
                     garagesSection
                 }
 
-                // MARK: - Destination Info
-                destinationCard
+
 
                 Spacer(minLength: 40)
             }
@@ -151,7 +149,7 @@ struct HeatZoneDetailView: View {
         HStack(spacing: 14) {
             // Openness bar
             RoundedRectangle(cornerRadius: 3)
-                .fill(busyColor(spot.opennessBusyLevel))
+                .fill(busyColor(spot.computedBusyLevel))
                 .frame(width: 4, height: 44)
 
             VStack(alignment: .leading, spacing: 4) {
@@ -174,12 +172,12 @@ struct HeatZoneDetailView: View {
                 }
 
                 HStack(spacing: 12) {
-                    if let pct = spot.opennessPercentage {
+                    if let score = spot.computedScore {
                         HStack(spacing: 4) {
-                            Text(pct)
+                            Text("\(score)")
                                 .font(.system(size: 13, weight: .bold, design: .rounded))
-                                .foregroundStyle(busyColor(spot.opennessBusyLevel))
-                            Text("open")
+                                .foregroundStyle(busyColor(spot.computedBusyLevel))
+                            Text("score")
                                 .font(.system(size: 12))
                                 .foregroundStyle(isDark ? .white.opacity(0.4) : .secondary)
                         }
@@ -200,19 +198,19 @@ struct HeatZoneDetailView: View {
             Spacer()
 
             // Openness probability gauge
-            if let prob = spot.opennessProbability {
+            if let score = spot.computedScore {
                 ZStack {
                     Circle()
-                        .strokeBorder(busyColor(spot.opennessBusyLevel).opacity(0.2), lineWidth: 3)
+                        .strokeBorder(busyColor(spot.computedBusyLevel).opacity(0.2), lineWidth: 3)
                         .frame(width: 40, height: 40)
 
                     Circle()
-                        .trim(from: 0, to: prob)
-                        .stroke(busyColor(spot.opennessBusyLevel), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                        .trim(from: 0, to: Double(score) / 100.0)
+                        .stroke(busyColor(spot.computedBusyLevel), style: StrokeStyle(lineWidth: 3, lineCap: .round))
                         .frame(width: 40, height: 40)
                         .rotationEffect(.degrees(-90))
 
-                    Text("\(Int(prob * 100))")
+                    Text("\(score)")
                         .font(.system(size: 11, weight: .bold, design: .rounded))
                         .foregroundStyle(isDark ? .white : .primary)
                 }
@@ -264,20 +262,15 @@ struct HeatZoneDetailView: View {
                     .foregroundStyle(isDark ? .white : .primary)
 
                 HStack(spacing: 12) {
-                    if let capacity = spot.capacityString {
-                        HStack(spacing: 3) {
-                            Ph.car.fill
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(width: 12, height: 12)
-                            Text(capacity)
-                                .font(.system(size: 12, weight: .medium))
+                    if let score = spot.computedScore {
+                        HStack(spacing: 4) {
+                            Text("\(score)")
+                                .font(.system(size: 13, weight: .bold, design: .rounded))
+                                .foregroundStyle(busyColor(spot.computedBusyLevel))
+                            Text("score")
+                                .font(.system(size: 12))
+                                .foregroundStyle(isDark ? .white.opacity(0.4) : .secondary)
                         }
-                        .foregroundStyle(
-                            (spot.spotsAvailable ?? 0) > 20
-                                ? Color(red: 0.30, green: 0.78, blue: 0.40)
-                                : Color(red: 1.0, green: 0.55, blue: 0.30)
-                        )
                     }
 
                     HStack(spacing: 3) {
@@ -294,65 +287,30 @@ struct HeatZoneDetailView: View {
 
             Spacer()
 
-            Text(spot.type.displayName)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(isDark ? .white.opacity(0.4) : .secondary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(
-                    Capsule()
-                        .fill(isDark ? .white.opacity(0.08) : .gray.opacity(0.08))
-                )
+            // Garage Score gauge
+            if let score = spot.computedScore {
+                ZStack {
+                    Circle()
+                        .strokeBorder(busyColor(spot.computedBusyLevel).opacity(0.2), lineWidth: 3)
+                        .frame(width: 40, height: 40)
+
+                    Circle()
+                        .trim(from: 0, to: Double(score) / 100.0)
+                        .stroke(busyColor(spot.computedBusyLevel), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                        .frame(width: 40, height: 40)
+                        .rotationEffect(.degrees(-90))
+
+                    Text("\(score)")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundStyle(isDark ? .white : .primary)
+                }
+            }
         }
         .padding(14)
         .background(cardBackground)
     }
 
-    // MARK: - Destination Card
 
-    private var destinationCard: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(Color.red.opacity(0.15))
-                    .frame(width: 40, height: 40)
-
-                Ph.flagCheckered.regular
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .foregroundStyle(.red)
-                    .frame(width: 18, height: 18)
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Destination")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(isDark ? .white.opacity(0.4) : .secondary)
-                    .textCase(.uppercase)
-                    .tracking(0.5)
-
-                Text(destinationName)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(isDark ? .white : .primary)
-            }
-
-            Spacer()
-
-            Text("END")
-                .font(.system(size: 12, weight: .bold, design: .rounded))
-                .foregroundStyle(.red)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(
-                    Capsule()
-                        .fill(Color.red.opacity(0.12))
-                )
-        }
-        .padding(16)
-        .background(cardBackground)
-    }
-
-    // MARK: - Helpers
 
     private var cardBackground: some View {
         RoundedRectangle(cornerRadius: 14)
@@ -423,8 +381,7 @@ struct HeatZoneDetailView: View {
                     )
                 ],
                 boundaryCoords: []
-            ),
-            destinationName: "West Campus"
+            )
         )
     }
 }

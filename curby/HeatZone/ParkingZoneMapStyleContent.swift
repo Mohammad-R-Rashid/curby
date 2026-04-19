@@ -50,7 +50,8 @@ struct ParkingZoneMapStyleContent: MapStyleContent {
                 idPrefix: "parking-street",
                 surfaces: streetSurfaces,
                 style: .street,
-                interactionLayerID: ParkingZoneLayerIDs.streetHitLayer
+                interactionLayerID: ParkingZoneLayerIDs.streetHitLayer,
+                isLine: true
             )
         }
 
@@ -97,7 +98,8 @@ struct ParkingZoneMapStyleContent: MapStyleContent {
         idPrefix: String,
         surfaces: [ParkingSurface],
         style: ParkingSurfaceVisualStyle,
-        interactionLayerID: String
+        interactionLayerID: String,
+        isLine: Bool = false
     ) -> some MapStyleContent {
         let sourceID = "\(idPrefix)-source"
         let selectedSourceID = "\(idPrefix)-selected-source"
@@ -109,59 +111,141 @@ struct ParkingZoneMapStyleContent: MapStyleContent {
         GeoJSONSource(id: sourceID)
             .data(.featureCollection(HeatZoneGeometry.featureCollection(for: surfaces)))
 
-        fillSourceAndLayer(
-            sourceID: "\(idPrefix)-open-source",
-            layerID: "\(idPrefix)-fill-open",
-            surfaces: openSurfaces,
-            color: HeatZoneGeometry.styleColor(for: .open),
-            style: style
-        )
+        if isLine {
+            lineSourceAndLayer(
+                sourceID: "\(idPrefix)-open-source",
+                layerID: "\(idPrefix)-line-open",
+                surfaces: openSurfaces,
+                color: HeatZoneGeometry.styleColor(for: .open),
+                style: style
+            )
+            lineSourceAndLayer(
+                sourceID: "\(idPrefix)-busy-source",
+                layerID: "\(idPrefix)-line-busy",
+                surfaces: busySurfaces,
+                color: HeatZoneGeometry.styleColor(for: .busy),
+                style: style
+            )
+            lineSourceAndLayer(
+                sourceID: "\(idPrefix)-veryBusy-source",
+                layerID: "\(idPrefix)-line-veryBusy",
+                surfaces: veryBusySurfaces,
+                color: HeatZoneGeometry.styleColor(for: .veryBusy),
+                style: style
+            )
 
-        fillSourceAndLayer(
-            sourceID: "\(idPrefix)-busy-source",
-            layerID: "\(idPrefix)-fill-busy",
-            surfaces: busySurfaces,
-            color: HeatZoneGeometry.styleColor(for: .busy),
-            style: style
-        )
+            LineLayer(id: interactionLayerID, source: sourceID)
+                .lineColor(StyleColor(.white))
+                .lineOpacity(0.01)
+                .lineWidth(style.strokeWidth + 10.0) // Wide interaction area
+                .lineCap(.round)
+                .lineJoin(.round)
+                .slot(style.slot ?? .middle)
+        } else {
+            fillSourceAndLayer(
+                sourceID: "\(idPrefix)-open-source",
+                layerID: "\(idPrefix)-fill-open",
+                surfaces: openSurfaces,
+                color: HeatZoneGeometry.styleColor(for: .open),
+                style: style
+            )
 
-        fillSourceAndLayer(
-            sourceID: "\(idPrefix)-veryBusy-source",
-            layerID: "\(idPrefix)-fill-veryBusy",
-            surfaces: veryBusySurfaces,
-            color: HeatZoneGeometry.styleColor(for: .veryBusy),
-            style: style
-        )
+            fillSourceAndLayer(
+                sourceID: "\(idPrefix)-busy-source",
+                layerID: "\(idPrefix)-fill-busy",
+                surfaces: busySurfaces,
+                color: HeatZoneGeometry.styleColor(for: .busy),
+                style: style
+            )
 
-        strokeLayer(
-            id: "\(idPrefix)-stroke",
-            sourceID: sourceID,
-            style: style
-        )
+            fillSourceAndLayer(
+                sourceID: "\(idPrefix)-veryBusy-source",
+                layerID: "\(idPrefix)-fill-veryBusy",
+                surfaces: veryBusySurfaces,
+                color: HeatZoneGeometry.styleColor(for: .veryBusy),
+                style: style
+            )
 
-        // A nearly transparent fill layer makes the rendered polygons consistently tappable.
-        interactionLayer(
-            id: interactionLayerID,
-            sourceID: sourceID,
-            style: style
-        )
+            strokeLayer(
+                id: "\(idPrefix)-stroke",
+                sourceID: sourceID,
+                style: style
+            )
+
+            interactionLayer(
+                id: interactionLayerID,
+                sourceID: sourceID,
+                style: style
+            )
+        }
 
         if !selectedSurfaces.isEmpty {
             GeoJSONSource(id: selectedSourceID)
                 .data(.featureCollection(HeatZoneGeometry.featureCollection(for: selectedSurfaces)))
 
-            selectedFillLayer(
-                id: "\(idPrefix)-selected-fill",
-                sourceID: selectedSourceID,
-                style: style
-            )
+            if isLine {
+                LineLayer(id: "\(idPrefix)-selected-stroke", source: selectedSourceID)
+                    .lineColor(StyleColor(.white))
+                    .lineOpacity(1.0)
+                    .lineWidth(style.selectedStrokeWidth)
+                    .lineJoin(.round)
+                    .lineCap(.round)
+                    .slot(style.slot ?? .middle)
+            } else {
+                selectedFillLayer(
+                    id: "\(idPrefix)-selected-fill",
+                    sourceID: selectedSourceID,
+                    style: style
+                )
 
-            selectedStrokeLayer(
-                id: "\(idPrefix)-selected-stroke",
-                sourceID: selectedSourceID,
+                selectedStrokeLayer(
+                    id: "\(idPrefix)-selected-stroke",
+                    sourceID: selectedSourceID,
+                    style: style
+                )
+            }
+        }
+    }
+
+    @MapStyleContentBuilder
+    private func lineSourceAndLayer(
+        sourceID: String,
+        layerID: String,
+        surfaces: [ParkingSurface],
+        color: StyleColor,
+        style: ParkingSurfaceVisualStyle
+    ) -> some MapStyleContent {
+        if !surfaces.isEmpty {
+            GeoJSONSource(id: sourceID)
+                .data(.featureCollection(HeatZoneGeometry.featureCollection(for: surfaces)))
+
+            coloredLineLayer(
+                id: layerID,
+                sourceID: sourceID,
+                color: color,
                 style: style
             )
         }
+    }
+
+    private func coloredLineLayer(
+        id: String,
+        sourceID: String,
+        color: StyleColor,
+        style: ParkingSurfaceVisualStyle
+    ) -> LineLayer {
+        var layer = LineLayer(id: id, source: sourceID)
+            .lineColor(color)
+            .lineOpacity(style.fillOpacity) // repurposing fillOpacity as line opacity
+            .lineWidth(style.strokeWidth)   // repurposing strokeWidth as main line width
+            .lineCap(.round)
+            .lineJoin(.round)
+
+        if let slot = style.slot {
+            layer = layer.slot(slot)
+        }
+
+        return layer
     }
 
     @MapStyleContentBuilder
@@ -292,11 +376,11 @@ private struct ParkingSurfaceVisualStyle {
 
     static let street = ParkingSurfaceVisualStyle(
         slot: .middle,
-        fillOpacity: 0.48,
-        strokeOpacity: 0.80,
-        strokeWidth: 1.6,
-        selectedFillOpacity: 0.62,
-        selectedStrokeWidth: 2.4
+        fillOpacity: 1.0,
+        strokeOpacity: 0.0,
+        strokeWidth: 5.5,
+        selectedFillOpacity: 1.0,
+        selectedStrokeWidth: 8.5
     )
 
     static let garage = ParkingSurfaceVisualStyle(

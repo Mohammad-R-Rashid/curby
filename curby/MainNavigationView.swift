@@ -216,6 +216,10 @@ struct MainNavigationView: View {
                 hasLoadedMap = true
                 requestParkingSurfaceAlignmentIfNeeded(using: proxy)
             }
+            .onMapIdle { _ in
+                // Ensures we query roads only after vector tiles finish streaming in.
+                requestParkingSurfaceAlignmentIfNeeded(using: proxy)
+            }
             .onCameraChanged { event in
                 let zoom = event.cameraState.zoom
                 currentMapZoom = zoom
@@ -551,8 +555,7 @@ struct MainNavigationView: View {
                 .padding(.bottom, 8)
 
                 HeatZoneDetailView(
-                    zone: zone,
-                    destinationName: searchState.selectedDestination?.name ?? "Destination"
+                    zone: zone
                 )
             }
         } else {

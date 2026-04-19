@@ -242,7 +242,7 @@ struct ParkingSpot: Identifiable, Hashable {
     let walkingDistance: Double // miles
 
     // Street/curbside specific
-    let roadName: String?
+    var roadName: String?
     /// Probability that this road segment has open spots (0.0–1.0).
     /// This is the core algorithm output — stubbed with mock data.
     let opennessProbability: Double?
@@ -306,5 +306,27 @@ struct ParkingSpot: Identifiable, Hashable {
 
         let occupancy = 1.0 - (Double(available) / Double(total))
         return BusyLevel(score: Int(occupancy * 100))
+    }
+
+    /// A unified 0-100 score for UI display.
+    var computedScore: Int? {
+        if type == .streetCurbside || type == .metered {
+            guard let prob = opennessProbability else { return nil }
+            return Int(prob * 100)
+        } else {
+            // Simplified logic: availability percentage
+            // Later this will be populated directly from the backend parking score algorithm
+            guard let available = spotsAvailable, let total = totalSpots, total > 0 else { return nil }
+            return Int((Double(available) / Double(total)) * 100)
+        }
+    }
+
+    /// Unified busy level based on the computed score.
+    var computedBusyLevel: BusyLevel {
+        guard let score = computedScore else { return .open }
+        // For parking score, higher means MORE open.
+        if score >= 60 { return .open }
+        if score >= 30 { return .busy }
+        return .veryBusy
     }
 }

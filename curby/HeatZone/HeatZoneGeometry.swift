@@ -143,28 +143,7 @@ enum HeatZoneGeometry {
         return coords
     }
 
-    /// Creates a narrow corridor polygon around a road centerline so street parking
-    /// stays aligned to the mapped street instead of drifting across adjacent buildings.
-    static func corridorBoundary(
-        along centerline: [CLLocationCoordinate2D],
-        widthMeters: Double
-    ) -> [CLLocationCoordinate2D]? {
-        let path = deduplicatedCoordinates(centerline)
-        guard path.count >= 2 else { return nil }
 
-        let halfWidth = max(2.0, widthMeters / 2.0)
-        let leftEdge = offsetPath(path, distanceMeters: halfWidth, bearingDeltaDegrees: 90)
-        let rightEdge = offsetPath(path, distanceMeters: halfWidth, bearingDeltaDegrees: -90).reversed()
-
-        guard leftEdge.count >= 2, rightEdge.count >= 2 else { return nil }
-
-        var coords = leftEdge + rightEdge
-        if let first = coords.first {
-            coords.append(first)
-        }
-
-        return coords
-    }
 
     /// Offsets a coordinate by local north/east metre values.
     static func offsetCoordinate(
@@ -216,7 +195,14 @@ enum HeatZoneGeometry {
     }
 
     nonisolated static func feature(for surface: ParkingSurface) -> Feature {
-        var feature = Feature(geometry: .polygon(polygon(from: surface.polygonCoords)))
+        let geometry: Geometry
+        if surface.kind == .curbSegment {
+            geometry = .lineString(LineString(surface.polygonCoords))
+        } else {
+            geometry = .polygon(polygon(from: surface.polygonCoords))
+        }
+
+        var feature = Feature(geometry: geometry)
         feature.identifier = .string(surface.id.uuidString)
         feature.properties = [
             "zone_id": .string(surface.zoneID.uuidString),

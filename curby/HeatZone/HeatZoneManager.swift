@@ -102,6 +102,7 @@ final class HeatZoneManager {
             )
 
             var updatedSurfaces = zone.parkingSurfaces
+            var updatedSpots = zone.parkingSpots
             var zoneChanged = false
 
             for surfaceIndex in updatedSurfaces.indices {
@@ -119,7 +120,7 @@ final class HeatZoneManager {
 
                 guard
                     let spot = spotsByReference[reference],
-                    let alignedBoundary = ParkingRoadAlignment.alignedBoundary(
+                    let alignmentData = ParkingRoadAlignment.alignedBoundaryAndName(
                         for: spot,
                         using: roads
                     )
@@ -127,18 +128,23 @@ final class HeatZoneManager {
                     continue
                 }
 
+                newlyAlignedReferences.insert(reference)
+
                 updatedSurfaces[surfaceIndex] = ParkingSurface(
                     id: surface.id,
                     zoneID: surface.zoneID,
-                    name: surface.name,
+                    name: alignmentData.name ?? surface.name,
                     kind: surface.kind,
                     busyLevel: surface.busyLevel,
-                    polygonCoords: alignedBoundary,
-                    minimumZoom: surface.minimumZoom,
+                    polygonCoords: alignmentData.coordinates,
                     sourceReference: surface.sourceReference
                 )
 
-                newlyAlignedReferences.insert(reference)
+                if let name = alignmentData.name, !name.isEmpty,
+                   let sIndex = updatedSpots.firstIndex(where: { $0.id == spot.id }) {
+                    updatedSpots[sIndex].roadName = name
+                }
+
                 zoneChanged = true
             }
 
@@ -149,16 +155,16 @@ final class HeatZoneManager {
                     coordinate: zone.coordinate,
                     radius: zone.radius,
                     busyScore: zone.busyScore,
-                    parkingSpots: zone.parkingSpots,
+                    parkingSpots: updatedSpots,
                     boundaryCoords: zone.boundaryCoords,
                     parkingSurfaces: updatedSurfaces
                 )
             }
         }
 
-        // Mark all attempted references done (success or failure) so we never retry
-        // surfaces that couldn't find a matching road in this query's result set.
-        alignedStreetSurfaceReferences.formUnion(attemptedReferences)
+        // Only mark successfully aligned surfaces so we can retry the failed ones
+        // when more detailed vector tiles stream in during zooming.
+        alignedStreetSurfaceReferences.formUnion(newlyAlignedReferences)
 
         guard !newlyAlignedReferences.isEmpty else {
             return 0
@@ -246,7 +252,7 @@ final class HeatZoneManager {
             }
         }
 
-        alignedStructureSurfaceReferences.formUnion(attemptedReferences)
+        alignedStructureSurfaceReferences.formUnion(newlyAlignedReferences)
 
         guard !newlyAlignedReferences.isEmpty else {
             return 0
@@ -436,9 +442,10 @@ final class HeatZoneManager {
             case .streetCurbside, .metered:
                 let segmentLengthFeet = spot.segmentLength ?? 180
                 let segmentLengthMeters = max(28, min(segmentLengthFeet * 0.3048, zoneSizeMeters * 0.7))
-                let corridorWidth = spot.type == .metered ? 8.0 : 11.0
                 let alignment = streetSurfaceIndex.isMultiple(of: 2) ? zoneRotation : zoneRotation + 90
                 streetSurfaceIndex += 1
+                let p1 = HeatZoneGeometry.offsetCoordinate(from: spot.coordinate, distanceMeters: -segmentLengthMeters/2.0, bearingDegrees: alignment)
+                let p2 = HeatZoneGeometry.offsetCoordinate(from: spot.coordinate, distanceMeters: segmentLengthMeters/2.0, bearingDegrees: alignment)
 
                 surfaces.append(
                     ParkingSurface(
@@ -446,12 +453,7 @@ final class HeatZoneManager {
                         name: spot.displayName,
                         kind: .curbSegment,
                         busyLevel: spot.opennessBusyLevel,
-                        polygonCoords: HeatZoneGeometry.rectangleBoundary(
-                            center: spot.coordinate,
-                            lengthMeters: segmentLengthMeters,
-                            widthMeters: corridorWidth,
-                            rotation: alignment
-                        ),
+                        polygonCoords: [p1, p2],
                         sourceReference: spot.id.uuidString
                     )
                 )

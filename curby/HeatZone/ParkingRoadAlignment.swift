@@ -54,32 +54,25 @@ enum ParkingRoadAlignment {
         }
     }
 
-    static func alignedBoundary(
+    static func alignedBoundaryAndName(
         for spot: ParkingSpot,
         using roads: [ParkingRoadFeature]
-    ) -> [CLLocationCoordinate2D]? {
+    ) -> (coordinates: [CLLocationCoordinate2D], name: String?)? {
         guard let match = bestMatch(for: spot, in: roads) else {
             return nil
         }
 
         let desiredLengthMeters = segmentLengthMeters(for: spot)
-        let corridorWidthMeters = corridorWidthMeters(for: spot)
 
-        guard
-            let centerlineSlice = slicedCenterline(
-                from: match.road.centerline,
-                around: match.closestCoordinate,
-                lengthMeters: desiredLengthMeters
-            ),
-            let boundary = HeatZoneGeometry.corridorBoundary(
-                along: centerlineSlice.coordinates,
-                widthMeters: corridorWidthMeters
-            )
-        else {
+        guard let centerlineSlice = slicedCenterline(
+            from: match.road.centerline,
+            around: match.closestCoordinate,
+            lengthMeters: desiredLengthMeters
+        ) else {
             return nil
         }
 
-        return boundary
+        return (centerlineSlice.coordinates, match.road.name)
     }
 
     private static func roadFeatures(
@@ -198,16 +191,7 @@ enum ParkingRoadAlignment {
         return max(26.0, min(segmentLengthFeet * 0.3048, 95.0))
     }
 
-    private static func corridorWidthMeters(for spot: ParkingSpot) -> Double {
-        switch spot.type {
-        case .metered:
-            return CurbyConstants.parkingMeteredCorridorWidthMeters
-        case .streetCurbside:
-            return CurbyConstants.parkingStreetCorridorWidthMeters
-        default:
-            return CurbyConstants.parkingStreetCorridorWidthMeters
-        }
-    }
+
 
     private static func classPenalty(for roadClass: String?) -> Double {
         switch roadClass {
@@ -261,8 +245,7 @@ enum ParkingRoadAlignment {
     private static func isStreetCandidateClass(_ roadClass: String?) -> Bool {
         switch roadClass {
         case "street", "street_limited", "tertiary", "tertiary_link",
-             "secondary", "secondary_link", "primary", "primary_link",
-             "service":
+             "secondary", "secondary_link", "primary", "primary_link":
             return true
         default:
             return false
