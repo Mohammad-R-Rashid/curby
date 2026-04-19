@@ -31,6 +31,10 @@
 	<string>Curby uses your location to show your position on the map and find parking near you.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Curby uses your location in the background to detect parking availability as you drive and notify you of open spots nearby.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -7,8 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		89EE5FB72F94197500804594 /* MapboxMaps in Frameworks */ = {isa = PBXBuildFile; productRef = 894496302F93FB0100026B35 /* MapboxMaps */; };
 		89A1B2C32F9500AA00660AE9 /* PhosphorSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 89A1B2C42F9500AA00660AE9 /* PhosphorSwift */; };
+		89EE5FB72F94197500804594 /* MapboxMaps in Frameworks */ = {isa = PBXBuildFile; productRef = 894496302F93FB0100026B35 /* MapboxMaps */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -410,7 +410,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 7D742L5CU8;
+				DEVELOPMENT_TEAM = Q28X3ZL47A;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
@@ -441,7 +441,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 7D742L5CU8;
+				DEVELOPMENT_TEAM = Q28X3ZL47A;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
