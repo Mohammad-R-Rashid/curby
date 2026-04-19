@@ -1,16 +1,15 @@
 // ============================================================
-// Curby Parking Load Balancer — 7-Factor Scoring Algorithm
+// Curby Parking Load Balancer — 5-Factor Scoring Algorithm
 // ============================================================
 //
-// S(i) = w₁·f_avail + w₂·f_turn + w₃·f_travel + w₄·f_congest
-//        + w₅·f_walk + w₆·f_load + w₇·f_conf
+// S(i) = w₁·f_avail + w₂·f_turn + w₃·f_travel + w₄·f_walk + w₅·f_load
 //
 // NORMALIZATION GUARANTEES:
 //   1. Every factor fⱼ ∈ [0, 1] — enforced by clamp()
 //   2. Weights are normalized to sum = 1.0 at runtime
 //      → S(i) ∈ [0, 1] is GUARANTEED regardless of config
 //   3. Data confidence modulates availability + turnover
-//      so no-data areas can't get artificially high scores
+//      so no-data areas can't get artificially high scores.
 //   4. Deterministic tiebreaker (areaId) prevents sort instability
 //
 // All weights come from remote config (Cloudflare KV).
@@ -37,23 +36,19 @@ function normalizeWeights(
     raw.availability +
     raw.turnover +
     raw.travelTime +
-    raw.congestion +
     raw.walkDistance +
-    raw.loadBalance +
-    raw.confidence;
+    raw.loadBalance;
 
   // Guard against zero/negative sum
   if (sum <= 0) {
     // Fall back to equal weights
-    const eq = 1 / 7;
+    const eq = 1 / 5;
     return {
       availability: eq,
       turnover: eq,
       travelTime: eq,
-      congestion: eq,
       walkDistance: eq,
       loadBalance: eq,
-      confidence: eq,
     };
   }
 
@@ -61,10 +56,8 @@ function normalizeWeights(
     availability: raw.availability / sum,
     turnover: raw.turnover / sum,
     travelTime: raw.travelTime / sum,
-    congestion: raw.congestion / sum,
     walkDistance: raw.walkDistance / sum,
     loadBalance: raw.loadBalance / sum,
-    confidence: raw.confidence / sum,
   };
 }
 
@@ -80,10 +73,11 @@ function fAvail(
   parkedCount: number,
   capacity: number,
   departureRate: number,
+  arrivalRate: number,
   travelTimeMin: number,
 ): number {
   if (capacity <= 0) return 0.5; // Guard against bad config
-  const expectedVacancy = (capacity - parkedCount) + departureRate * travelTimeMin;
+  const expectedVacancy = (capacity - parkedCount) + (departureRate - arrivalRate) * travelTimeMin;
   return clamp(expectedVacancy / capacity, 0, 1);
 }
 
@@ -130,43 +124,7 @@ function fTravel(travelMinutes: number, decayMin: number): number {
   return Math.exp(-Math.max(travelMinutes, 0) / decayMin);
 }
 
-// ─── Factor 4: Congestion ───────────────────────────────────
-// Distance-weighted average of Mapbox congestion_numeric values.
-// f_congest = max(0, 1 - c̄/100)
 
-function fCongestion(
-  congestionNumeric: number[],
-  segmentDistances: number[],
-): number {
-  if (congestionNumeric.length === 0 || segmentDistances.length === 0) {
-    return 0.5; // Unknown → neutral score
-  }
-
-  const totalDist = segmentDistances.reduce((a, b) => a + b, 0);
-  if (totalDist === 0) return 0.5;
-
-  const weightedCongestion = congestionNumeric.reduce(
-    (sum, c, idx) => sum + c * (segmentDistances[idx] ?? 0),
-    0,
-  ) / totalDist;
-
-  return clamp(1 - weightedCongestion / 100, 0, 1);
-}
-
-/**
- * Approximate congestion from Matrix API data.
- * Uses ratio of free-flow to traffic-aware travel time.
- *
- * IMPORTANT: When both values are unavailable and fall through
- * to the same default, this returns 0.5 (neutral) instead of 1.0,
- * preventing false "no congestion" signal.
- */
-function fCongestionApprox(freeFlowSec: number, trafficAwareSec: number): number {
-  if (trafficAwareSec <= 0 || freeFlowSec <= 0) return 0.5;
-  // If values are nearly identical, we have no real congestion data
-  if (Math.abs(trafficAwareSec - freeFlowSec) < 1) return 0.5;
-  return clamp(freeFlowSec / trafficAwareSec, 0, 1);
-}
 
 // ─── Factor 5: Walk Distance ────────────────────────────────
 // f_walk = e^(-w / w₀)
@@ -217,7 +175,6 @@ function buildReasoning(
   avail: number,
   turn: number,
   travel: number,
-  congest: number,
   walk: number,
   load: number,
   conf: number,
@@ -237,11 +194,6 @@ function buildReasoning(
   // Walk
   const wMin = candidate.traffic.walkTimeMin;
   parts.push(`${wMin.toFixed(0)} min walk to destination`);
-
-  // Congestion
-  if (congest >= 0.8) parts.push('light traffic');
-  else if (congest >= 0.5) parts.push('moderate traffic');
-  else parts.push('heavy traffic');
 
   // Turnover
   if (turn >= 0.5) parts.push('high turnover');
@@ -289,6 +241,7 @@ export function scoreAllAreas(
         c.occupancy.parkedCount,
         config.estimatedCapacityPerArea,
         c.occupancy.departureRate,
+        c.occupancy.arrivalRate, // Added arrivalRate
         c.traffic.travelTimeMin,
       );
 
@@ -303,14 +256,6 @@ export function scoreAllAreas(
       // Factors from Mapbox (not dependent on crowdsourced data quality)
       const travel = fTravel(c.traffic.travelTimeMin, config.travelTimeDecayMin);
 
-      const congest =
-        c.traffic.congestionNumeric && c.traffic.segmentDistances
-          ? fCongestion(c.traffic.congestionNumeric, c.traffic.segmentDistances)
-          : fCongestionApprox(
-              c.traffic.freeFlowSec ?? 0,
-              c.traffic.trafficAwareSec ?? 0,
-            );
-
       const walk = fWalk(c.traffic.walkTimeMin, config.walkTimeDecayMin);
       const load = fLoad(activeRouting.get(c.area.id) ?? 0, config.loadPenaltyK);
       const conf = fConfidence(c.occupancy.recentUniqueUsers, config.confidenceMinUsers);
@@ -319,7 +264,7 @@ export function scoreAllAreas(
       // When confidence is low, availability and turnover are
       // pulled toward 0.5 (uncertain) instead of being taken at face value.
       const avail = modulateByConfidence(rawAvail, conf);
-      const turn  = modulateByConfidence(rawTurn, conf);
+      const turn = modulateByConfidence(rawTurn, conf);
 
       // ── Weighted composite score ──
       // Guaranteed ∈ [0, 1] because:
@@ -327,12 +272,10 @@ export function scoreAllAreas(
       //   - Weights sum to 1.0 (normalized above)
       const score =
         weights.availability * avail +
-        weights.turnover     * turn +
-        weights.travelTime   * travel +
-        weights.congestion   * congest +
-        weights.walkDistance  * walk +
-        weights.loadBalance  * load +
-        weights.confidence   * conf;
+        weights.turnover * turn +
+        weights.travelTime * travel +
+        weights.walkDistance * walk +
+        weights.loadBalance * load;
 
       return {
         areaId: c.area.id,
@@ -341,12 +284,11 @@ export function scoreAllAreas(
           availability: avail,
           turnover: turn,
           travelTime: travel,
-          congestion: congest,
           walkDistance: walk,
           loadBalance: load,
           confidence: conf,
         },
-        reasoning: buildReasoning(avail, turn, travel, congest, walk, load, conf, c),
+        reasoning: buildReasoning(avail, turn, travel, walk, load, conf, c),
       };
     })
     // DETERMINISTIC SORT: by score descending, then by areaId ascending (tiebreaker)

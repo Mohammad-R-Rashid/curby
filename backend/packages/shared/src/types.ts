@@ -91,6 +91,7 @@ export interface ParkingCandidate {
     parkedCount: number;
     recentDepartures: number;
     departureRate: number;        // departures per minute
+    arrivalRate: number;          // arrivals per minute
     parkDurations: number[];      // minutes each car has been parked
     recentUniqueUsers: number;    // unique contributors in 24h
   };
@@ -103,7 +104,6 @@ export interface ScoredArea {
     availability: number;
     turnover: number;
     travelTime: number;
-    congestion: number;
     walkDistance: number;
     loadBalance: number;
     confidence: number;

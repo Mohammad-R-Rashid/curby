@@ -20,10 +20,8 @@ export interface CurbyRemoteConfig {
       availability: number;
       turnover: number;
       travelTime: number;
-      congestion: number;
       walkDistance: number;
       loadBalance: number;
-      confidence: number;
     };
     estimatedCapacityPerArea: number;
     recentDepartureWindowMin: number;
@@ -63,13 +61,11 @@ export const DEFAULT_CONFIG: CurbyRemoteConfig = {
 
   algorithm: {
     weights: {
-      availability: 0.30,
-      turnover: 0.10,
-      travelTime: 0.20,
-      congestion: 0.10,
+      availability: 0.35,
+      turnover: 0.15,
+      travelTime: 0.25,
       walkDistance: 0.15,
       loadBalance: 0.10,
-      confidence: 0.05,
     },
     estimatedCapacityPerArea: 50,
     recentDepartureWindowMin: 15,
