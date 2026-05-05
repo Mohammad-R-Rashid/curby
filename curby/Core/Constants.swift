@@ -19,8 +19,6 @@ enum CurbyConstants {
         longitude: -98.5795
     )
     static let defaultFallbackZoom: Double = 4.0
-    static let austinSouthwest = CLLocationCoordinate2D(latitude: 30.05, longitude: -98.10)
-    static let austinNortheast = CLLocationCoordinate2D(latitude: 30.55, longitude: -97.40)
 
     // MARK: - Zoom Levels
 
@@ -95,30 +93,14 @@ enum CurbyConstants {
     /// Slightly relaxed for OSM Nominatim (public instance etiquette).
     static let searchDebounceInterval: TimeInterval = 0.45
 
-    /// Nominatim `viewbox`: southwest lon, southwest lat, northeast lon, northeast lat.
-    static var nominatimViewboxParameter: String {
-        "\(austinSouthwest.longitude),\(austinSouthwest.latitude),\(austinNortheast.longitude),\(austinNortheast.latitude)"
-    }
-
     /// Required by Nominatim — identifies the app (see https://operations.osmfoundation.org/policies/nominatim/).
     static var nominatimUserAgent: String {
         let bundle = Bundle.main.bundleIdentifier ?? "com.hackmsa.curby"
         return "Curby-iOS/1.0 (\(bundle); parking-search)"
     }
-    static let apiBaseURL = "https://curby-api.mohammad-rashid7337.workers.dev"
+    static let apiBaseURL = "https://curby-api.shihabbilal.workers.dev"
     static let metersPerMile: Double = 1_609.344
     static let parkingGeofenceToleranceMeters: Double = 25.0
-
-    static var austinBoundingBoxParameter: String {
-        "\(austinSouthwest.longitude),\(austinSouthwest.latitude),\(austinNortheast.longitude),\(austinNortheast.latitude)"
-    }
-
-    static func isWithinAustinArea(_ coordinate: CLLocationCoordinate2D) -> Bool {
-        coordinate.latitude >= austinSouthwest.latitude &&
-            coordinate.latitude <= austinNortheast.latitude &&
-            coordinate.longitude >= austinSouthwest.longitude &&
-            coordinate.longitude <= austinNortheast.longitude
-    }
 
     // MARK: - Parking Geometry Detail
 

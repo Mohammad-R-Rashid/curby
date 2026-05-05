@@ -34,14 +34,6 @@ final class ParkingAreaManager {
         lastUserLocation = userLocation
         walkingGeofenceRadiusMeters = walkingRadiusMeters
 
-        guard CurbyConstants.isWithinAustinArea(coordinate) else {
-            areas = []
-            noParkingInGeofence = false
-            lastErrorMessage = "Curby currently supports Austin-area parking only."
-            isLoading = false
-            return
-        }
-
         guard let token = Bundle.main.object(forInfoDictionaryKey: "MBXAccessToken") as? String else {
             areas = []
             noParkingInGeofence = false
@@ -119,40 +111,59 @@ final class ParkingAreaManager {
         limit: Int,
         token: String
     ) async throws -> [LiveParkingArea] {
-        var components = URLComponents(string: "https://api.mapbox.com/search/searchbox/v1/category/parking")
-        components?.queryItems = [
-            URLQueryItem(name: "access_token", value: token),
-            URLQueryItem(name: "language", value: "en"),
-            URLQueryItem(name: "limit", value: String(min(max(limit, 1), 25))),
-            URLQueryItem(name: "proximity", value: "\(coordinate.longitude),\(coordinate.latitude)"),
-            URLQueryItem(name: "bbox", value: CurbyConstants.austinBoundingBoxParameter),
-            URLQueryItem(name: "country", value: "US"),
-        ]
+        // Search multiple Mapbox categories in parallel for better coverage
+        let categories = ["parking", "parking_lot"]
 
-        guard let url = components?.url else {
-            throw CurbyAPIClientError.invalidBaseURL
+        let allFeatures: [MapboxParkingCategoryFeature] = try await withThrowingTaskGroup(
+            of: [MapboxParkingCategoryFeature].self
+        ) { group in
+            for category in categories {
+                group.addTask {
+                    var components = URLComponents(string: "https://api.mapbox.com/search/searchbox/v1/category/\(category)")
+                    components?.queryItems = [
+                        URLQueryItem(name: "access_token", value: token),
+                        URLQueryItem(name: "language", value: "en"),
+                        URLQueryItem(name: "limit", value: String(min(max(limit, 1), 25))),
+                        URLQueryItem(name: "proximity", value: "\(coordinate.longitude),\(coordinate.latitude)"),
+                        URLQueryItem(name: "country", value: "US"),
+                    ]
+
+                    guard let url = components?.url else { return [] }
+
+                    let (data, response) = try await URLSession.shared.data(from: url)
+                    guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                        return []
+                    }
+
+                    let decoded = try JSONDecoder().decode(MapboxParkingCategoryResponse.self, from: data)
+                    return decoded.features
+                }
+            }
+
+            var collected: [MapboxParkingCategoryFeature] = []
+            for try await features in group {
+                collected.append(contentsOf: features)
+            }
+            return collected
         }
 
-        let (data, response) = try await URLSession.shared.data(from: url)
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw CurbyAPIClientError.badStatusCode(
-                (response as? HTTPURLResponse)?.statusCode ?? -1,
-                String(data: data, encoding: .utf8)
-            )
-        }
+        // Names to filter out — these are bike lockers, not real parking
+        let blockedPrefixes = ["bikelink", "bike link", "scooter"]
 
-        let decoded = try JSONDecoder().decode(MapboxParkingCategoryResponse.self, from: data)
-        let results = decoded.features.compactMap { feature -> LiveParkingArea? in
+        let results = allFeatures.compactMap { feature -> LiveParkingArea? in
             let name = feature.properties.name.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !name.isEmpty else { return nil }
+
+            // Filter out non-parking POIs
+            let nameLower = name.lowercased()
+            for prefix in blockedPrefixes {
+                if nameLower.hasPrefix(prefix) { return nil }
+            }
 
             let baseCoordinate = CLLocationCoordinate2D(
                 latitude: feature.geometry.coordinates[1],
                 longitude: feature.geometry.coordinates[0]
             )
-            guard CurbyConstants.isWithinAustinArea(baseCoordinate) else {
-                return nil
-            }
 
             let navigationCoordinate = feature.properties.coordinates.routablePoints.first.map {
                 CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
@@ -190,6 +201,7 @@ final class ParkingAreaManager {
             )
         }
 
+        // Deduplicate by Mapbox ID
         var uniqueResults: [LiveParkingArea] = []
         var seenIDs = Set<String>()
         for area in results {

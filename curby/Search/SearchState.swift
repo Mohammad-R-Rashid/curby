@@ -101,7 +101,6 @@ final class SearchState {
 
     // MARK: - Nominatim (OpenStreetMap)
 
-    /// Forward geocode via OSM Nominatim, biased to the Austin service area.
     private func geocodeNominatim(query: String) async -> [SearchResult] {
         var components = URLComponents(string: "https://nominatim.openstreetmap.org/search")
         components?.queryItems = [
@@ -109,8 +108,6 @@ final class SearchState {
             URLQueryItem(name: "format", value: "jsonv2"),
             URLQueryItem(name: "limit", value: "12"),
             URLQueryItem(name: "addressdetails", value: "1"),
-            URLQueryItem(name: "bounded", value: "1"),
-            URLQueryItem(name: "viewbox", value: CurbyConstants.nominatimViewboxParameter),
             URLQueryItem(name: "countrycodes", value: "us"),
         ]
 
@@ -141,7 +138,6 @@ final class SearchState {
                 else { continue }
 
                 let coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lon)
-                guard CurbyConstants.isWithinAustinArea(coordinate) else { continue }
 
                 let key = String(format: "%.4f,%.4f", lat, lon)
                 guard seen.insert(key).inserted else { continue }
@@ -186,11 +182,7 @@ final class SearchState {
 
     // MARK: - Selection
 
-    /// Select a destination from search results, popular locations, or recents.
     func selectDestination(name: String, subtitle: String, coordinate: CLLocationCoordinate2D) {
-        guard CurbyConstants.isWithinAustinArea(coordinate) else {
-            return
-        }
 
         let destination = SelectedDestination(
             name: name,

@@ -48,6 +48,11 @@ struct MainNavigationView: View {
 
     @State private var heatZoneManager = HeatZoneManager()
     @State private var currentMapZoom: Double = CurbyConstants.zoomDefault
+    @State private var lastHeatZoneLoadCenter: CLLocationCoordinate2D?
+    @State private var placesSearchCoordinate: CLLocationCoordinate2D?
+
+    // MARK: - Places Pins (shown when no destination is selected)
+    @State private var placesForMap: [PopularLocation] = []
 
     // MARK: - Dropped Pin State
 
@@ -137,7 +142,6 @@ struct MainNavigationView: View {
                 )
                 .presentationDragIndicator(.visible)
                 .presentationBackgroundInteraction(.enabled(upThrough: .medium))
-                .presentationCornerRadius(24)
                 .interactiveDismissDisabled()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(.systemBackground))
@@ -162,6 +166,12 @@ struct MainNavigationView: View {
                 syncSavedParkPinFromDetector()
             }
             syncSavedParkPinFromDetector()
+            // Populate place pins for the map
+            if let coord = locationService.currentLocation?.coordinate {
+                updatePlacesForMap(center: coord)
+            } else {
+                placesForMap = PopularLocation.locations(near: nil)
+            }
         }
         .onChange(of: parkingEventDetector.presenceState) { _, new in
             if new == .driving {
@@ -195,6 +205,9 @@ struct MainNavigationView: View {
             focusRecommendation(recommendation)
         }
         .onChange(of: parkingAreaManager.areas.map(\.id)) { _, newIDs in
+            // Rebuild heat zones from real parking POIs
+            heatZoneManager.loadZones(from: parkingAreaManager.areas)
+
             guard let selectedParkingArea else { return }
             if
                 !newIDs.contains(selectedParkingArea.id),
@@ -297,22 +310,51 @@ struct MainNavigationView: View {
                     .priority(9)
                 }
 
-                ForEvery(visibleParkingAreas) { area in
-                    MapViewAnnotation(coordinate: area.coordinate) {
-                        LiveParkingAreaMapPin(
-                            area: area,
-                            isSelected: selectedParkingArea?.id == area.id,
-                            developerLabels: developerModeEnabled
-                        )
-                        .onTapGesture {
-                            selectParkingArea(area)
+                // Show parking areas as labeled pins when zoomed in enough
+                if currentMapZoom >= 11.0 {
+                    ForEvery(visibleParkingAreas) { area in
+                        MapViewAnnotation(coordinate: area.coordinate) {
+                            LiveParkingAreaMapPin(
+                                area: area,
+                                isSelected: selectedParkingArea?.id == area.id,
+                                showLabel: currentMapZoom >= 13.0,
+                                developerLabels: developerModeEnabled
+                            )
+                            .onTapGesture {
+                                selectParkingArea(area)
+                            }
                         }
+                        .allowZElevate(true)
+                        .allowOverlap(currentMapZoom >= 14.0)
+                        .priority(selectedParkingArea?.id == area.id ? 7 : (area.kind == .street ? 5 : 4))
                     }
-                    .allowZElevate(true)
-                    .allowOverlap(true)
-                    .priority(selectedParkingArea?.id == area.id ? 7 : (area.kind == .street ? 5 : 4))
                 }
 
+                // Popular places pins — visible when browsing (no destination selected)
+                if searchState.selectedDestination == nil, currentMapZoom >= 10.0 {
+                    ForEvery(placesForMap) { place in
+                        MapViewAnnotation(coordinate: place.coordinate) {
+                            PlaceMapPin(
+                                place: place,
+                                showLabel: currentMapZoom >= 11.5
+                            )
+                            .onTapGesture {
+                                CurbyHaptics.selection()
+                                searchState.selectDestination(
+                                    name: place.name,
+                                    subtitle: place.subtitle,
+                                    coordinate: place.coordinate
+                                )
+                                if let dest = searchState.selectedDestination {
+                                    handleDestinationSelected(dest)
+                                }
+                            }
+                        }
+                        .allowZElevate(true)
+                        .allowOverlap(currentMapZoom >= 12.5)
+                        .priority(3)
+                    }
+                }
                 if developerModeEnabled {
                     ForEvery(parkingAreaManager.areas.filter { area in
                         navigationCoordinateDiffers(from: area)
@@ -401,7 +443,19 @@ struct MainNavigationView: View {
             }
             .onCameraChanged { change in
                 currentMapZoom = change.cameraState.zoom
+                let center = change.cameraState.center
+                
+                // Update places bar if zoomed in enough
+                if change.cameraState.zoom >= 10.0 {
+                    placesSearchCoordinate = center
+                    if searchState.selectedDestination == nil {
+                        updatePlacesForMap(center: center)
+                    }
+                }
+                
                 alignZonesIfNeeded(proxy: proxy, zoom: change.cameraState.zoom)
+                
+
             }
         }
     }
@@ -529,6 +583,29 @@ struct MainNavigationView: View {
         }
     }
 
+    private func handleDestinationSelected(_ dest: SelectedDestination) {
+        customPinCoordinate = nil
+        selectedParkingArea = nil
+        parkingAreaManager.loadAreas(
+            around: dest.coordinate,
+            userLocation: locationService.currentLocation?.coordinate,
+            walkingRadiusMeters: walkingGeofenceMeters
+        )
+        cameraController.navigateToDestination(dest.coordinate)
+        sheetDetent = .fraction(0.25)
+        Task {
+            await parkingWebSocketManager.findParking(
+                for: dest,
+                currentLocation: locationService.currentLocation?.coordinate,
+                searchRadiusMeters: walkingGeofenceMeters
+            )
+        }
+    }
+
+    private func updatePlacesForMap(center: CLLocationCoordinate2D) {
+        placesForMap = PopularLocation.locations(near: center)
+    }
+
     private func refreshParkingExperienceForCurrentDestination(retryBackend: Bool) {
         guard let destination = searchState.selectedDestination else { return }
 
@@ -567,7 +644,6 @@ struct MainNavigationView: View {
             SettingsView()
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
-                .presentationCornerRadius(24)
         }
     }
 
@@ -678,29 +754,14 @@ struct MainNavigationView: View {
                 parkingAreaManager: parkingAreaManager,
                 parkingSearchManager: parkingWebSocketManager,
                 parkingEventDetector: parkingEventDetector,
+                mapCenter: placesSearchCoordinate,
                 showRecenterButton: cameraController.showRecenterButton,
                 onRecenter: { cameraController.recenter() },
                 onMarkAsParked: {
                     Task { await saveParkPinFromDestinationSheet() }
                 },
                 onDestinationSelected: { dest in
-                    customPinCoordinate = nil
-                    selectedParkingArea = nil
-                    parkingAreaManager.loadAreas(
-                        around: dest.coordinate,
-                        userLocation: locationService.currentLocation?.coordinate,
-                        walkingRadiusMeters: walkingGeofenceMeters
-                    )
-                    heatZoneManager.loadZones(around: dest.coordinate, destinationName: dest.name, radiusMeters: walkingGeofenceMeters)
-                    cameraController.navigateToDestination(dest.coordinate)
-                    sheetDetent = .fraction(0.25)
-                    Task {
-                        await parkingWebSocketManager.findParking(
-                            for: dest,
-                            currentLocation: locationService.currentLocation?.coordinate,
-                            searchRadiusMeters: walkingGeofenceMeters
-                        )
-                    }
+                    handleDestinationSelected(dest)
                 },
                 onParkingAreaSelected: { area in
                     selectParkingArea(area)
@@ -1385,11 +1446,12 @@ private struct RecommendationMapPin: View {
 private struct LiveParkingAreaMapPin: View {
     let area: LiveParkingArea
     let isSelected: Bool
+    var showLabel: Bool = true
     var developerLabels: Bool = false
 
     var body: some View {
-        if isSelected {
-            // Expanded detail balloon — same style as recommendation pin
+        if isSelected || showLabel {
+            // Full labeled balloon
             VStack(spacing: 0) {
                 HStack(spacing: 6) {
                     icon.fill
@@ -1420,17 +1482,17 @@ private struct LiveParkingAreaMapPin: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .curbyGlassSurface(tint: tint, cornerRadius: 18)
-                .shadow(color: tint.opacity(0.18), radius: 8, y: 4)
+                .curbyGlassSurface(tint: isSelected ? tint : nil, cornerRadius: 18)
+                .shadow(color: (isSelected ? tint : .black).opacity(isSelected ? 0.22 : 0.10), radius: isSelected ? 8 : 4, y: isSelected ? 4 : 2)
 
                 Triangle()
-                    .fill(tint)
+                    .fill(isSelected ? tint : Color.gray.opacity(0.5))
                     .frame(width: 10, height: 6)
                     .rotationEffect(.degrees(180))
                     .offset(y: -1)
             }
         } else {
-            // Compact alternative pin — small circle with "P" and colored ring
+            // Compact dot — visible when zoomed out
             ZStack {
                 Circle()
                     .fill(.white.opacity(0.92))
@@ -1441,9 +1503,11 @@ private struct LiveParkingAreaMapPin: View {
                     }
                     .shadow(color: .black.opacity(0.18), radius: 4, y: 2)
 
-                Text(kindInitial)
-                    .font(.system(size: 11, weight: .black, design: .rounded))
+                icon.fill
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
                     .foregroundStyle(tint)
+                    .frame(width: 13, height: 13)
             }
         }
     }
@@ -1509,10 +1573,75 @@ private struct LiveParkingAreaMapPin: View {
 
 // MARK: - Preview
 
+// MARK: - Place Map Pin (popular locations on browse map)
+
+private struct PlaceMapPin: View {
+    let place: PopularLocation
+    var showLabel: Bool = true
+
+    var body: some View {
+        if showLabel {
+            VStack(spacing: 0) {
+                HStack(spacing: 6) {
+                    place.icon.fill
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .foregroundStyle(.white)
+                        .frame(width: 13, height: 13)
+                        .frame(width: 24, height: 24)
+                        .background(tint, in: Circle())
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(place.name)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+
+                        Text(place.subtitle)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .curbyGlassSurface(cornerRadius: 18)
+                .shadow(color: .black.opacity(0.10), radius: 4, y: 2)
+
+                Triangle()
+                    .fill(tint.opacity(0.6))
+                    .frame(width: 10, height: 6)
+                    .rotationEffect(.degrees(180))
+                    .offset(y: -1)
+            }
+        } else {
+            ZStack {
+                Circle()
+                    .fill(.white.opacity(0.92))
+                    .frame(width: 30, height: 30)
+                    .overlay {
+                        Circle()
+                            .strokeBorder(tint, lineWidth: 2.5)
+                    }
+                    .shadow(color: .black.opacity(0.18), radius: 4, y: 2)
+
+                place.icon.fill
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .foregroundStyle(tint)
+                    .frame(width: 14, height: 14)
+            }
+        }
+    }
+
+    private var tint: Color {
+        HeatZoneGeometry.color(for: place.busyLevel)
+    }
+}
+
 #Preview {
     MainNavigationView()
 }
-
 // MARK: - Saved park pin (manual Supabase `active_parks`)
 
 private struct SavedParkPinState: Equatable {

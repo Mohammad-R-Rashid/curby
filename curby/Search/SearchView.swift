@@ -20,6 +20,8 @@ struct SearchView: View {
     let parkingAreaManager: ParkingAreaManager
     let parkingSearchManager: ParkingWebSocketManager
     let parkingEventDetector: ParkingEventDetector
+    /// Coordinate to use for suggesting local places (updates as map pans)
+    var mapCenter: CLLocationCoordinate2D?
     /// Shown when the map is in free-explore mode (user panned away from follow).
     var showRecenterButton: Bool = false
     var onRecenter: (() -> Void)?
@@ -31,6 +33,10 @@ struct SearchView: View {
     var onExpandWalkingRadius: (() -> Void)?
 
     @FocusState private var isSearchFocused: Bool
+    
+    // Dynamic POI State
+    @State private var dynamicPlaces: [PopularLocation] = []
+    @State private var placesFetchTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -92,6 +98,16 @@ struct SearchView: View {
             }
             .scrollDismissesKeyboard(.interactively)
         }
+        .onChange(of: mapCenter?.latitude) { _, _ in
+            if let center = mapCenter {
+                fetchDynamicPlaces(around: center)
+            }
+        }
+        .onAppear {
+            if dynamicPlaces.isEmpty, let center = mapCenter ?? searchState.userLocation {
+                fetchDynamicPlaces(around: center)
+            }
+        }
     }
 
     @ViewBuilder
@@ -130,7 +146,7 @@ struct SearchView: View {
             Text(
                 queryLength < 2
                     ? "Enter at least two characters to search streets, places, and businesses."
-                    : "Try a street name, neighborhood, business, or landmark. Results are limited to the greater Austin area Curby covers."
+                    : "Try a street name, neighborhood, business, or landmark."
             )
             .font(.system(size: 14))
             .foregroundStyle(.secondary)
@@ -583,7 +599,8 @@ struct SearchView: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {
-                    ForEach(PopularLocation.austinLocations) { location in
+                    let placesToDisplay = dynamicPlaces.isEmpty ? PopularLocation.locations(near: mapCenter ?? searchState.userLocation) : dynamicPlaces
+                    ForEach(placesToDisplay) { location in
                         Button {
                             CurbyHaptics.selection()
                             searchState.selectDestination(
@@ -610,8 +627,8 @@ struct SearchView: View {
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .foregroundStyle(HeatZoneGeometry.color(for: location.busyLevel))
-                .frame(width: 26, height: 26)
-                .frame(width: 56, height: 56)
+                .frame(width: 30, height: 30)
+                .frame(width: 68, height: 68)
                 .glassEffect(
                     .regular.tint(HeatZoneGeometry.color(for: location.busyLevel).opacity(0.18)),
                     in: .circle
@@ -622,10 +639,11 @@ struct SearchView: View {
                 }
 
             Text(location.name)
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
-                .frame(width: 70)
+                .minimumScaleFactor(0.75)
+                .frame(width: 80)
 
             Circle()
                 .fill(HeatZoneGeometry.color(for: location.busyLevel))
@@ -809,6 +827,107 @@ struct SearchView: View {
         mapItem.openInMaps(launchOptions: [
             MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving
         ])
+    }
+
+    // MARK: - MapKit Area / Landmark Search
+
+    /// Queries to find notable areas, districts and landmarks — not individual shops.
+    private static let landmarkQueries: [(query: String, icon: Ph)] = [
+        ("shopping district",  .bag),
+        ("university",         .graduationCap),
+        ("park",               .tree),
+        ("downtown",           .buildings),
+        ("museum",             .ticket),
+        ("stadium",            .speakerHifi),
+        ("hospital",           .firstAid),
+        ("airport",            .airplane),
+        ("mall",               .storefront),
+        ("beach",              .umbrella),
+    ]
+
+    private func fetchDynamicPlaces(around center: CLLocationCoordinate2D) {
+        placesFetchTask?.cancel()
+        placesFetchTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .milliseconds(500)) // debounce
+                guard !Task.isCancelled else { return }
+
+                let region = MKCoordinateRegion(
+                    center: center,
+                    latitudinalMeters: 8000,
+                    longitudinalMeters: 8000
+                )
+
+                var collected: [PopularLocation] = []
+                var seenNames: Set<String> = []
+
+                // Fire a few broad searches in parallel to find notable areas
+                await withTaskGroup(of: [(PopularLocation, Double)].self) { group in
+                    for entry in Self.landmarkQueries.prefix(6) {
+                        group.addTask {
+                            let request = MKLocalSearch.Request()
+                            request.naturalLanguageQuery = entry.query
+                            request.region = region
+                            request.resultTypes = .pointOfInterest
+
+                            guard let response = try? await MKLocalSearch(request: request).start() else {
+                                return []
+                            }
+
+                            let mapCenter = CLLocation(latitude: center.latitude, longitude: center.longitude)
+
+                            return response.mapItems.prefix(3).map { item in
+                                let loc = PopularLocation(
+                                    id: UUID(),
+                                    name: item.name ?? entry.query.capitalized,
+                                    icon: entry.icon,
+                                    coordinate: item.placemark.coordinate,
+                                    busyLevel: .busy,
+                                    subtitle: item.placemark.locality ?? item.placemark.subLocality ?? "Nearby"
+                                )
+                                let dist = CLLocation(
+                                    latitude: item.placemark.coordinate.latitude,
+                                    longitude: item.placemark.coordinate.longitude
+                                ).distance(from: mapCenter)
+                                return (loc, dist)
+                            }
+                        }
+                    }
+
+                    for await results in group {
+                        for (place, _) in results {
+                            let key = place.name.lowercased()
+                            if !seenNames.contains(key) {
+                                seenNames.insert(key)
+                                collected.append(place)
+                            }
+                        }
+                    }
+                }
+
+                guard !Task.isCancelled else { return }
+
+                // Sort by distance from center, take the closest 8
+                let mapCenter = CLLocation(latitude: center.latitude, longitude: center.longitude)
+                let sorted = collected.sorted { a, b in
+                    let da = CLLocation(latitude: a.coordinate.latitude, longitude: a.coordinate.longitude)
+                        .distance(from: mapCenter)
+                    let db = CLLocation(latitude: b.coordinate.latitude, longitude: b.coordinate.longitude)
+                        .distance(from: mapCenter)
+                    return da < db
+                }
+
+                let finalPlaces = Array(sorted.prefix(8))
+
+                if !finalPlaces.isEmpty {
+                    withAnimation(.spring(response: 0.3)) {
+                        self.dynamicPlaces = finalPlaces
+                    }
+                }
+            } catch {
+                // Keep showing previous places on error
+            }
+        }
     }
 }
 

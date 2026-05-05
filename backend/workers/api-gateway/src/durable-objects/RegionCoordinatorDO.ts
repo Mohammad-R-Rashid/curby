@@ -174,21 +174,6 @@ export class RegionCoordinatorDO extends DurableObject<Env> {
     destLng: number,
     radius?: number,
   ): Promise<void> {
-    const isWithinAustinArea =
-      destLat >= 30.05 &&
-      destLat <= 30.55 &&
-      destLng >= -98.10 &&
-      destLng <= -97.40;
-
-    if (!isWithinAustinArea) {
-      this.send(ws, {
-        type: 'error',
-        code: 'OUTSIDE_AUSTIN',
-        message: 'Curby currently supports live parking only in Austin.',
-      });
-      return;
-    }
-
     const config = await getConfig(this.env.CURBY_CONFIG);
     const searchRadius = radius ?? config.search.defaultRadiusMeters;
     const destination: LatLng = { lat: destLat, lng: destLng };

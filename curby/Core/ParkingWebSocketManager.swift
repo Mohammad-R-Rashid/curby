@@ -81,11 +81,6 @@ final class ParkingWebSocketManager {
         currentLocation: CLLocationCoordinate2D?,
         searchRadiusMeters: Double? = nil
     ) async {
-        guard CurbyConstants.isWithinAustinArea(destination.coordinate) else {
-            status = .error("Curby currently supports live parking only in Austin.")
-            lastErrorCode = "OUTSIDE_AUSTIN"
-            return
-        }
 
         guard let currentLocation else {
             status = .error("Current location is required before Curby can route you to parking.")

@@ -9,7 +9,7 @@
 // own Overpass instance and point `overpassInterpreterUrl` in remote config.
 
 import type { LatLng, MapboxParkingArea } from './types.js';
-import { distanceMeters, isWithinAustinArea } from './geo.js';
+import { distanceMeters } from './geo.js';
 
 /** Primary + mirrors — public Overpass is best-effort (504/timeouts are common). */
 const DEFAULT_OVERPASS_MIRRORS = [
@@ -115,9 +115,7 @@ export async function searchOsmParkingAreas(
   interpreterUrl?: string,
   signal?: AbortSignal,
 ): Promise<MapboxParkingArea[]> {
-  if (!isWithinAustinArea(destination)) {
-    return [];
-  }
+
 
   const query = buildOverpassQuery(destination.lat, destination.lng, radiusMeters);
   const preferred = interpreterUrl?.trim();
@@ -141,7 +139,7 @@ export async function searchOsmParkingAreas(
     for (const el of elements) {
       const center = elementCenter(el);
       if (!center) continue;
-      if (!isWithinAustinArea(center)) continue;
+
 
       const d = distanceMeters(destination, center);
       if (d > radiusMeters + 35) continue;

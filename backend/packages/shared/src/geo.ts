@@ -6,17 +6,7 @@ import type { LatLng } from './types.js';
 
 const EARTH_RADIUS_METERS = 6_371_000;
 
-/** Mapbox Search `bbox` parameter for Austin metro bias. */
-export const AUSTIN_BBOX = '-98.10,30.05,-97.40,30.55';
 
-export function isWithinAustinArea(point: LatLng): boolean {
-  return (
-    point.lat >= 30.05 &&
-    point.lat <= 30.55 &&
-    point.lng >= -98.10 &&
-    point.lng <= -97.40
-  );
-}
 
 export function distanceMeters(a: LatLng, b: LatLng): number {
   const toRadians = (value: number): number => (value * Math.PI) / 180;

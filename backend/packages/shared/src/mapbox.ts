@@ -4,7 +4,7 @@
 // Wraps Search Box, Matrix, and Directions APIs.
 
 import type { MapboxParkingArea, MapboxDirectionsResult, LatLng, GeoJSONLineString } from './types.js';
-import { AUSTIN_BBOX, distanceMeters, isWithinAustinArea } from './geo.js';
+import { distanceMeters } from './geo.js';
 
 const MAPBOX_BASE = 'https://api.mapbox.com';
 
@@ -28,9 +28,7 @@ export async function searchParkingAreas(
   limit: number,
   accessToken: string,
 ): Promise<MapboxParkingArea[]> {
-  if (!isWithinAustinArea(destination)) {
-    return [];
-  }
+
 
   // Search Box category uses `proximity` as a bias, so we fetch a wider
   // candidate set first and then enforce Curby's walking geofence locally.
@@ -44,7 +42,7 @@ export async function searchParkingAreas(
   url.searchParams.set('access_token', accessToken);
   url.searchParams.set('language', 'en');
   url.searchParams.set('country', 'US');
-  url.searchParams.set('bbox', AUSTIN_BBOX);
+
 
   const res = await fetch(url.toString());
   if (!res.ok) {

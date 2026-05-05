@@ -99,4 +99,74 @@ extension PopularLocation {
             subtitle: "East Side Entertainment"
         )
     ]
+
+    /// Hardcoded popular locations in the Bay Area, CA.
+    static let bayAreaLocations: [PopularLocation] = [
+        PopularLocation(
+            id: UUID(),
+            name: "Downtown SF",
+            icon: .buildings,
+            coordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.4194),
+            busyLevel: .veryBusy,
+            subtitle: "Financial District"
+        ),
+        PopularLocation(
+            id: UUID(),
+            name: "Stanford",
+            icon: .graduationCap,
+            coordinate: CLLocationCoordinate2D(latitude: 37.4275, longitude: -122.1697),
+            busyLevel: .veryBusy,
+            subtitle: "Stanford University"
+        ),
+        PopularLocation(
+            id: UUID(),
+            name: "Santana Row",
+            icon: .bag,
+            coordinate: CLLocationCoordinate2D(latitude: 37.3202, longitude: -121.9479),
+            busyLevel: .busy,
+            subtitle: "Shopping & Dining"
+        ),
+        PopularLocation(
+            id: UUID(),
+            name: "Downtown SJ",
+            icon: .storefront,
+            coordinate: CLLocationCoordinate2D(latitude: 37.3382, longitude: -121.8863),
+            busyLevel: .busy,
+            subtitle: "San Jose"
+        ),
+        PopularLocation(
+            id: UUID(),
+            name: "Golden Gate",
+            icon: .bridge,
+            coordinate: CLLocationCoordinate2D(latitude: 37.8199, longitude: -122.4783),
+            busyLevel: .veryBusy,
+            subtitle: "Golden Gate Park"
+        ),
+        PopularLocation(
+            id: UUID(),
+            name: "Palo Alto",
+            icon: .coffee,
+            coordinate: CLLocationCoordinate2D(latitude: 37.4419, longitude: -122.1430),
+            busyLevel: .busy,
+            subtitle: "University Ave"
+        )
+    ]
+
+    /// Returns mock locations sorted by distance to the provided coordinate.
+    static func locations(near coordinate: CLLocationCoordinate2D?) -> [PopularLocation] {
+        guard let coordinate = coordinate else { return austinLocations }
+        
+        let allLocations = austinLocations + bayAreaLocations
+        let mapLocation = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        
+        // Sort all mock locations by distance from the center of the screen
+        let sorted = allLocations.sorted { loc1, loc2 in
+            let cl1 = CLLocation(latitude: loc1.coordinate.latitude, longitude: loc1.coordinate.longitude)
+            let cl2 = CLLocation(latitude: loc2.coordinate.latitude, longitude: loc2.coordinate.longitude)
+            return cl1.distance(from: mapLocation) < cl2.distance(from: mapLocation)
+        }
+        
+        // Return the closest 6
+        return Array(sorted.prefix(6))
+    }
 }

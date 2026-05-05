@@ -162,6 +162,7 @@ struct OnboardingView: View {
             }
         }
         .curbyGlassSurface(cornerRadius: CurbyGlass.cardCornerRadius)
+        .environment(\.colorScheme, .dark)
     }
 
     private func permissionRow(
@@ -271,6 +272,7 @@ struct OnboardingView: View {
         }
         .padding(16)
         .curbyGlassSurface(tint: CurbyGlass.successTint, cornerRadius: CurbyGlass.cardCornerRadius)
+        .environment(\.colorScheme, .dark)
     }
 
     // MARK: - Get Started Button

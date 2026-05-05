@@ -23,7 +23,7 @@
 	<key>MBXAccessToken</key>
 	<string>pk.eyJ1IjoiY29kZW9saXZlNzMzNyIsImEiOiJjbW80bnoyYXAxZ2RtMnRvZjIzZmVweHBqIn0.o1460B_12pz6qaH1s49QNA</string>
 	<key>CurbyAPIBaseURL</key>
-	<string>https://curby-api.mohammad-rashid7337.workers.dev</string>
+	<string>https://curby-api.shihabbilal.workers.dev</string>
 	<key>NSLocationTemporaryUsageDescriptionDictionary</key>
 	<dict>
 		<key>LocationAccuracyAuthorizationDescription</key>

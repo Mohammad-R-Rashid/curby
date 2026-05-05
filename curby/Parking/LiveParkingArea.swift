@@ -38,7 +38,7 @@ struct LiveParkingArea: Identifiable, Hashable {
         if !placeFormatted.isEmpty {
             return placeFormatted
         }
-        return "Austin, Texas"
+        return "Local Parking"
     }
 
     var distanceText: String {

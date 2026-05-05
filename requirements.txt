@@ -1,0 +1,14 @@
+# Python Requirements for Curby Utility Scripts
+# These scripts are used for UI updates and API testing.
+
+# Core utilities
+requests>=2.31.0  # Optional, but recommended for more robust API testing
+urllib3>=2.0.0
+
+# If you plan to run any local data analysis scripts:
+# pandas>=2.1.0
+# numpy>=1.26.0
+
+# Note: The main Curby application is built with SwiftUI (iOS) and the 
+# backend is built with TypeScript (Cloudflare Workers/pnpm).
+# See README_SETUP.md for the full environment setup.

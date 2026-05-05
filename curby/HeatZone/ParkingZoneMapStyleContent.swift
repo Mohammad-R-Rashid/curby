@@ -367,11 +367,11 @@ private struct ParkingSurfaceVisualStyle {
 
     static let overview = ParkingSurfaceVisualStyle(
         slot: .bottom,
-        fillOpacity: 0.28,
-        strokeOpacity: 0.0,
-        strokeWidth: 0.0,
-        selectedFillOpacity: 0.40,
-        selectedStrokeWidth: 0.0
+        fillOpacity: 0.38,
+        strokeOpacity: 0.55,
+        strokeWidth: 1.5,
+        selectedFillOpacity: 0.50,
+        selectedStrokeWidth: 2.5
     )
 
     static let street = ParkingSurfaceVisualStyle(

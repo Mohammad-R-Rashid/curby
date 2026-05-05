@@ -98,15 +98,6 @@ struct ExpandedMapView: View {
             }
         }
         .navigationBarHidden(true)
-        .onAppear {
-            if let dest = destination {
-                heatZoneManager.loadZones(
-                    around: dest.coordinate,
-                    destinationName: dest.name,
-                    radiusMeters: OnboardingState.storedWalkingDistanceMeters
-                )
-            }
-        }
     }
 
     // MARK: - Map Layer
