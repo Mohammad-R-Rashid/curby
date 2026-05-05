@@ -114,34 +114,39 @@ final class ParkingAreaManager {
         // Search multiple Mapbox categories in parallel for better coverage
         let categories = ["parking", "parking_lot"]
 
-        let allFeatures: [MapboxParkingCategoryFeature] = try await withThrowingTaskGroup(
+        let allFeatures: [MapboxParkingCategoryFeature] = await withTaskGroup(
             of: [MapboxParkingCategoryFeature].self
         ) { group in
             for category in categories {
                 group.addTask {
-                    var components = URLComponents(string: "https://api.mapbox.com/search/searchbox/v1/category/\(category)")
-                    components?.queryItems = [
-                        URLQueryItem(name: "access_token", value: token),
-                        URLQueryItem(name: "language", value: "en"),
-                        URLQueryItem(name: "limit", value: String(min(max(limit, 1), 25))),
-                        URLQueryItem(name: "proximity", value: "\(coordinate.longitude),\(coordinate.latitude)"),
-                        URLQueryItem(name: "country", value: "US"),
-                    ]
+                    do {
+                        var components = URLComponents(string: "https://api.mapbox.com/search/searchbox/v1/category/\(category)")
+                        components?.queryItems = [
+                            URLQueryItem(name: "access_token", value: token),
+                            URLQueryItem(name: "language", value: "en"),
+                            URLQueryItem(name: "limit", value: String(min(max(limit, 1), 25))),
+                            URLQueryItem(name: "proximity", value: "\(coordinate.longitude),\(coordinate.latitude)"),
+                            URLQueryItem(name: "country", value: "US"),
+                        ]
 
-                    guard let url = components?.url else { return [] }
+                        guard let url = components?.url else { return [] }
 
-                    let (data, response) = try await URLSession.shared.data(from: url)
-                    guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                        let (data, response) = try await URLSession.shared.data(from: url)
+                        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                            return []
+                        }
+
+                        let decoded = try JSONDecoder().decode(MapboxParkingCategoryResponse.self, from: data)
+                        return decoded.features
+                    } catch {
+                        // Fail individual category gracefully so others can still return data
                         return []
                     }
-
-                    let decoded = try JSONDecoder().decode(MapboxParkingCategoryResponse.self, from: data)
-                    return decoded.features
                 }
             }
 
             var collected: [MapboxParkingCategoryFeature] = []
-            for try await features in group {
+            for await features in group {
                 collected.append(contentsOf: features)
             }
             return collected
@@ -165,7 +170,7 @@ final class ParkingAreaManager {
                 longitude: feature.geometry.coordinates[0]
             )
 
-            let navigationCoordinate = feature.properties.coordinates.routablePoints.first.map {
+            let navigationCoordinate = feature.properties.coordinates?.routablePoints?.first.map {
                 CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
             } ?? baseCoordinate
             let destinationDistanceMeters = CLLocation(
@@ -259,7 +264,7 @@ private struct MapboxParkingCategoryFeature: Decodable {
                 }
             }
 
-            let routablePoints: [RoutablePoint]
+            let routablePoints: [RoutablePoint]?
 
             private enum CodingKeys: String, CodingKey {
                 case routablePoints = "routable_points"
@@ -291,7 +296,7 @@ private struct MapboxParkingCategoryFeature: Decodable {
         let address: String?
         let fullAddress: String?
         let placeFormatted: String?
-        let coordinates: Coordinates
+        let coordinates: Coordinates?
         let poiCategoryIDs: [String]?
         let metadata: Metadata?
         let distance: Double?
