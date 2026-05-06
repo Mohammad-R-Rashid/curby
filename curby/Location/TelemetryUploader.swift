@@ -25,6 +25,10 @@ final class TelemetryUploader {
     @ObservationIgnored private var pendingPayloads: [CurbyTelemetryPayload] = []
     @ObservationIgnored private var isFlushing = false
     @ObservationIgnored private let timestampFormatter = ISO8601DateFormatter()
+    /// Coordinate of the most recent enqueued sample. We skip new samples
+    /// inside the configured `minDistanceMeters` so a stationary user doesn't
+    /// keep re-uploading the same point.
+    @ObservationIgnored private var lastEnqueuedCoordinate: CLLocationCoordinate2D?
 
     private static let pendingKey = "curby.telemetry.pending"
 
@@ -65,6 +69,15 @@ final class TelemetryUploader {
     private func enqueueLatestSampleIfAvailable() {
         guard let latestLocation else { return }
 
+        // Skip when the user hasn't moved meaningfully since the last enqueue.
+        let minDistance = max(0, remoteConfigService.config.telemetry.minDistanceMeters)
+        if minDistance > 0, let lastCoord = lastEnqueuedCoordinate {
+            let lastLoc = CLLocation(latitude: lastCoord.latitude, longitude: lastCoord.longitude)
+            if latestLocation.distance(from: lastLoc) < minDistance {
+                return
+            }
+        }
+
         let payload = CurbyTelemetryPayload(
             userId: apiClient.userID,
             lat: latestLocation.coordinate.latitude,
@@ -76,6 +89,7 @@ final class TelemetryUploader {
         )
 
         pendingPayloads.append(payload)
+        lastEnqueuedCoordinate = latestLocation.coordinate
         if pendingPayloads.count > 250 {
             pendingPayloads.removeFirst(pendingPayloads.count - 250)
         }

@@ -42,6 +42,20 @@ struct SearchView: View {
     // Dynamic POI State
     @State private var dynamicPlaces: [PopularLocation] = []
     @State private var placesFetchTask: Task<Void, Never>?
+    /// Last map center we successfully fetched dynamic places for. Used to skip
+    /// re-fetching while the user pans within the same area (Apple throttles
+    /// MKLocalSearch at 50 requests / 60 seconds, and each fetch fires several).
+    @State private var lastFetchedCenter: CLLocationCoordinate2D?
+
+    /// Don't refetch dynamic Places unless the map center has moved at least
+    /// this far from the last successful fetch.
+    private static let dynamicPlacesRefetchDistanceMeters: Double = 1_500
+
+    private var isBrowseMode: Bool {
+        searchState.selectedDestination == nil
+            && exploredPlace == nil
+            && !searchState.isSearchActive
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -122,14 +136,19 @@ struct SearchView: View {
             .scrollDismissesKeyboard(.interactively)
         }
         .onChange(of: mapCenter?.latitude) { _, _ in
-            if let center = mapCenter {
-                fetchDynamicPlaces(around: center)
+            guard isBrowseMode, let center = mapCenter else { return }
+            if let last = lastFetchedCenter,
+               CLLocation(latitude: last.latitude, longitude: last.longitude)
+                .distance(from: CLLocation(latitude: center.latitude, longitude: center.longitude))
+                < Self.dynamicPlacesRefetchDistanceMeters {
+                return
             }
+            fetchDynamicPlaces(around: center)
         }
         .onAppear {
-            if dynamicPlaces.isEmpty, let center = mapCenter ?? searchState.userLocation {
-                fetchDynamicPlaces(around: center)
-            }
+            guard isBrowseMode, dynamicPlaces.isEmpty,
+                  let center = mapCenter ?? searchState.userLocation else { return }
+            fetchDynamicPlaces(around: center)
         }
     }
 
@@ -908,8 +927,10 @@ struct SearchView: View {
         placesFetchTask?.cancel()
         placesFetchTask = Task { @MainActor in
             do {
-                try await Task.sleep(for: .milliseconds(500)) // debounce
-                guard !Task.isCancelled else { return }
+                // Apple throttles MKLocalSearch at 50 requests / 60 seconds.
+                // Keep the debounce generous and the parallelism low.
+                try await Task.sleep(for: .milliseconds(1_200))
+                guard !Task.isCancelled, isBrowseMode else { return }
 
                 let region = MKCoordinateRegion(
                     center: center,
@@ -922,7 +943,7 @@ struct SearchView: View {
 
                 // Fire a few broad searches in parallel to find notable areas
                 await withTaskGroup(of: [(PopularLocation, Double)].self) { group in
-                    for entry in Self.landmarkQueries.prefix(6) {
+                    for entry in Self.landmarkQueries.prefix(3) {
                         group.addTask {
                             let request = MKLocalSearch.Request()
                             request.naturalLanguageQuery = entry.query
@@ -983,6 +1004,9 @@ struct SearchView: View {
                         self.dynamicPlaces = finalPlaces
                     }
                 }
+                // Remember where we last fetched so we don't refire while
+                // the user pans within the same area.
+                lastFetchedCenter = center
             } catch {
                 // Keep showing previous places on error
             }
