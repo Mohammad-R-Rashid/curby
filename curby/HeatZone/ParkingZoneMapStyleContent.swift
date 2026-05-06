@@ -30,11 +30,25 @@ struct ParkingZoneMapStyleContent: MapStyleContent {
         let garageSurfaces = visibleSurfaces.filter { $0.kind == .garageFootprint }
         let lotSurfaces = visibleSurfaces.filter { $0.kind == .lotFootprint }
 
-        VectorSource(id: ParkingRoadNetworkIDs.source)
-            .url("mapbox://mapbox.mapbox-streets-v8")
+        // The road/building "loader layers" exist only so we can later query
+        // the global mapbox-streets-v8 source for alignment. Loading that
+        // source is extremely expensive (it's every road and building on
+        // Earth), so only attach it when we actually have surfaces that need
+        // alignment. Currently zones generate overview surfaces only; the
+        // source stays unloaded until real street/structure geometry returns.
+        let needsRoadSource = !streetSurfaces.isEmpty
+        let needsBuildingSource = !garageSurfaces.isEmpty || !lotSurfaces.isEmpty
 
-        roadLoaderLayer
-        buildingLoaderLayer
+        if needsRoadSource || needsBuildingSource {
+            VectorSource(id: ParkingRoadNetworkIDs.source)
+                .url("mapbox://mapbox.mapbox-streets-v8")
+        }
+        if needsRoadSource {
+            roadLoaderLayer
+        }
+        if needsBuildingSource {
+            buildingLoaderLayer
+        }
 
         if !overviewSurfaces.isEmpty {
             surfaceGroup(
