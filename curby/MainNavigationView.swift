@@ -481,8 +481,17 @@ struct MainNavigationView: View {
                 }
                 let center = change.cameraState.center
 
-                // Update places bar if zoomed in enough
-                if newZoom >= 10.0 {
+                // Throttle places-related state updates by a 100m distance
+                // threshold. Without this, every camera tick mutates two
+                // @State properties and forces MainNavigationView's body —
+                // which contains every map annotation — to recompute.
+                let centerMovedSignificantly: Bool = {
+                    guard let last = placesSearchCoordinate else { return true }
+                    return CLLocation(latitude: last.latitude, longitude: last.longitude)
+                        .distance(from: CLLocation(latitude: center.latitude, longitude: center.longitude)) > 100
+                }()
+
+                if newZoom >= 10.0, centerMovedSignificantly {
                     placesSearchCoordinate = center
                     if searchState.selectedDestination == nil {
                         updatePlacesForMap(center: center)
