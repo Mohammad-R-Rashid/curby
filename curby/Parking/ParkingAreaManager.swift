@@ -111,23 +111,47 @@ final class ParkingAreaManager {
         limit: Int,
         token: String
     ) async throws -> [LiveParkingArea] {
-        // Search multiple Mapbox categories in parallel for better coverage
-        let categories = ["parking", "parking_lot"]
+        // Mapbox SearchBox returns the same data for `parking` and `parking_lot`,
+        // and a `proximity`-only call tends to return up to 25 entries for the
+        // single most popular garage in dense areas (different mapbox_ids,
+        // identical coordinates). Pair a bbox-restricted call (diverse urban
+        // results) with a proximity-only call (covers sparse suburban areas
+        // where the bbox can be empty). Coordinate dedup below collapses any
+        // remaining coincident entries.
+        let pageLimit = String(min(max(limit, 1), 25))
+        let proximity = "\(coordinate.longitude),\(coordinate.latitude)"
+        let bboxPaddingMeters = walkingRadiusMeters + CurbyConstants.parkingGeofenceToleranceMeters
+        let metersPerLatDegree = 111_000.0
+        let metersPerLonDegree = 111_000.0 * max(cos(coordinate.latitude * .pi / 180), 0.1)
+        let dLat = bboxPaddingMeters / metersPerLatDegree
+        let dLon = bboxPaddingMeters / metersPerLonDegree
+        let bbox = "\(coordinate.longitude - dLon),\(coordinate.latitude - dLat),\(coordinate.longitude + dLon),\(coordinate.latitude + dLat)"
+
+        let queries: [[URLQueryItem]] = [
+            [
+                URLQueryItem(name: "access_token", value: token),
+                URLQueryItem(name: "language", value: "en"),
+                URLQueryItem(name: "limit", value: pageLimit),
+                URLQueryItem(name: "proximity", value: proximity),
+                URLQueryItem(name: "bbox", value: bbox),
+            ],
+            [
+                URLQueryItem(name: "access_token", value: token),
+                URLQueryItem(name: "language", value: "en"),
+                URLQueryItem(name: "limit", value: pageLimit),
+                URLQueryItem(name: "proximity", value: proximity),
+                URLQueryItem(name: "country", value: "US"),
+            ],
+        ]
 
         let allFeatures: [MapboxParkingCategoryFeature] = await withTaskGroup(
             of: [MapboxParkingCategoryFeature].self
         ) { group in
-            for category in categories {
+            for queryItems in queries {
                 group.addTask {
                     do {
-                        var components = URLComponents(string: "https://api.mapbox.com/search/searchbox/v1/category/\(category)")
-                        components?.queryItems = [
-                            URLQueryItem(name: "access_token", value: token),
-                            URLQueryItem(name: "language", value: "en"),
-                            URLQueryItem(name: "limit", value: String(min(max(limit, 1), 25))),
-                            URLQueryItem(name: "proximity", value: "\(coordinate.longitude),\(coordinate.latitude)"),
-                            URLQueryItem(name: "country", value: "US"),
-                        ]
+                        var components = URLComponents(string: "https://api.mapbox.com/search/searchbox/v1/category/parking_lot")
+                        components?.queryItems = queryItems
 
                         guard let url = components?.url else { return [] }
 
@@ -139,7 +163,6 @@ final class ParkingAreaManager {
                         let decoded = try JSONDecoder().decode(MapboxParkingCategoryResponse.self, from: data)
                         return decoded.features
                     } catch {
-                        // Fail individual category gracefully so others can still return data
                         return []
                     }
                 }
@@ -206,13 +229,38 @@ final class ParkingAreaManager {
             )
         }
 
-        // Deduplicate by Mapbox ID
-        var uniqueResults: [LiveParkingArea] = []
+        // Deduplicate by Mapbox ID, then coalesce near-coincident entries
+        // (Mapbox often surfaces the same physical garage as several POIs with
+        // distinct ids and slight name variations like "P5610" vs "P5610 Javits
+        // Center Parking"). Prefer the more descriptive name when collapsing.
+        var dedupedByID: [LiveParkingArea] = []
         var seenIDs = Set<String>()
         for area in results {
             if seenIDs.insert(area.id).inserted {
-                uniqueResults.append(area)
+                dedupedByID.append(area)
             }
+        }
+
+        let coalesceMeters: Double = 12.0
+        var uniqueResults: [LiveParkingArea] = []
+        for area in dedupedByID {
+            let candidate = CLLocation(
+                latitude: area.coordinate.latitude,
+                longitude: area.coordinate.longitude
+            )
+            if let existingIndex = uniqueResults.firstIndex(where: { existing in
+                CLLocation(
+                    latitude: existing.coordinate.latitude,
+                    longitude: existing.coordinate.longitude
+                ).distance(from: candidate) < coalesceMeters
+            }) {
+                if Self.descriptivenessScore(of: area.name)
+                    > Self.descriptivenessScore(of: uniqueResults[existingIndex].name) {
+                    uniqueResults[existingIndex] = area
+                }
+                continue
+            }
+            uniqueResults.append(area)
         }
 
         if let userLocation {
@@ -240,6 +288,13 @@ final class ParkingAreaManager {
             ($0.destinationDistanceMeters ?? .greatestFiniteMagnitude) <
                 ($1.destinationDistanceMeters ?? .greatestFiniteMagnitude)
         }
+    }
+
+    private static func descriptivenessScore(of name: String) -> Int {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let letterCount = trimmed.unicodeScalars.filter(CharacterSet.letters.contains).count
+        let hasSpace = trimmed.contains(" ")
+        return letterCount * 10 + (hasSpace ? 1_000 : 0) + trimmed.count
     }
 }
 
