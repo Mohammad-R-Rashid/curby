@@ -54,6 +54,11 @@ struct MainNavigationView: View {
     // MARK: - Places Pins (shown when no destination is selected)
     @State private var placesForMap: [PopularLocation] = []
 
+    // MARK: - Explore Mode (browse parking near a Place without setting a destination)
+    @State private var exploredPlace: PopularLocation?
+    @State private var hoveredPlace: PopularLocation?
+    @State private var hoverDetectTask: Task<Void, Never>?
+
     // MARK: - Dropped Pin State
 
     @State private var customPinCoordinate: CLLocationCoordinate2D?
@@ -114,6 +119,22 @@ struct MainNavigationView: View {
                     RotateGesture()
                         .onChanged { _ in cameraController.userDidInteract() }
                 )
+
+            // MARK: Hover popup — "you're in [place]" prompt
+            if let hoveredPlace {
+                VStack {
+                    HoverPlacePopup(
+                        place: hoveredPlace,
+                        onTap: { place in
+                            enterExploreMode(for: place)
+                        }
+                    )
+                    .padding(.top, 60)
+                    Spacer().allowsHitTesting(false)
+                }
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.2), value: hoveredPlace.id)
+            }
 
             // MARK: Map overlay controls
             overlayControls
@@ -339,15 +360,7 @@ struct MainNavigationView: View {
                                 showLabel: currentMapZoom >= 11.5
                             )
                             .onTapGesture {
-                                CurbyHaptics.selection()
-                                searchState.selectDestination(
-                                    name: place.name,
-                                    subtitle: place.subtitle,
-                                    coordinate: place.coordinate
-                                )
-                                if let dest = searchState.selectedDestination {
-                                    handleDestinationSelected(dest)
-                                }
+                                enterExploreMode(for: place)
                             }
                         }
                         .allowZElevate(true)
@@ -444,7 +457,7 @@ struct MainNavigationView: View {
             .onCameraChanged { change in
                 currentMapZoom = change.cameraState.zoom
                 let center = change.cameraState.center
-                
+
                 // Update places bar if zoomed in enough
                 if change.cameraState.zoom >= 10.0 {
                     placesSearchCoordinate = center
@@ -452,10 +465,9 @@ struct MainNavigationView: View {
                         updatePlacesForMap(center: center)
                     }
                 }
-                
-                alignZonesIfNeeded(proxy: proxy, zoom: change.cameraState.zoom)
-                
 
+                detectHoveredPlace(at: center, zoom: change.cameraState.zoom)
+                alignZonesIfNeeded(proxy: proxy, zoom: change.cameraState.zoom)
             }
         }
     }
@@ -586,6 +598,9 @@ struct MainNavigationView: View {
     private func handleDestinationSelected(_ dest: SelectedDestination) {
         customPinCoordinate = nil
         selectedParkingArea = nil
+        // Picking a real address ends any exploration session.
+        exploredPlace = nil
+        hoveredPlace = nil
         parkingAreaManager.loadAreas(
             around: dest.coordinate,
             userLocation: locationService.currentLocation?.coordinate,
@@ -599,6 +614,74 @@ struct MainNavigationView: View {
                 currentLocation: locationService.currentLocation?.coordinate,
                 searchRadiusMeters: walkingGeofenceMeters
             )
+        }
+    }
+
+    /// Browse parking + heat zones around a popular place without committing
+    /// to it as a routed destination. No `findParking` request is sent.
+    private func enterExploreMode(for place: PopularLocation) {
+        CurbyHaptics.selection()
+        customPinCoordinate = nil
+        selectedParkingArea = nil
+        hoveredPlace = nil
+        if searchState.selectedDestination != nil {
+            searchState.clearDestination()
+            Task { await parkingWebSocketManager.cancelSearch() }
+        }
+        exploredPlace = place
+        parkingAreaManager.loadAreas(
+            around: place.coordinate,
+            userLocation: locationService.currentLocation?.coordinate,
+            walkingRadiusMeters: walkingGeofenceMeters
+        )
+        cameraController.navigateToDestination(place.coordinate)
+        sheetDetent = .fraction(0.30)
+    }
+
+    private func exitExploreMode() {
+        exploredPlace = nil
+        selectedParkingArea = nil
+        parkingAreaManager.clear()
+        heatZoneManager.clearZones()
+        sheetDetent = .fraction(0.30)
+    }
+
+    /// Show the floating "you're in [place]" prompt when the map has been
+    /// holding still over a popular place for a beat. We debounce so the
+    /// label doesn't flash while the user pans through.
+    private func detectHoveredPlace(at center: CLLocationCoordinate2D, zoom: Double) {
+        // Don't compete with explicit modes.
+        guard searchState.selectedDestination == nil,
+              exploredPlace == nil,
+              !searchState.isSearchActive,
+              zoom >= 12.0
+        else {
+            hoverDetectTask?.cancel()
+            if hoveredPlace != nil { hoveredPlace = nil }
+            return
+        }
+
+        let centerLocation = CLLocation(latitude: center.latitude, longitude: center.longitude)
+        let nearest = placesForMap
+            .map { ($0, CLLocation(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude).distance(from: centerLocation)) }
+            .filter { $0.1 < 350 }
+            .min(by: { $0.1 < $1.1 })?
+            .0
+
+        guard let nearest else {
+            hoverDetectTask?.cancel()
+            if hoveredPlace != nil { hoveredPlace = nil }
+            return
+        }
+
+        // Already showing this one — debounce reset isn't needed.
+        if hoveredPlace?.id == nearest.id { return }
+
+        hoverDetectTask?.cancel()
+        hoverDetectTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            hoveredPlace = nearest
         }
     }
 
@@ -748,12 +831,13 @@ struct MainNavigationView: View {
                 )
             }
         } else {
-            // SEARCH / DESTINATION MODE
+            // SEARCH / DESTINATION / EXPLORE MODE
             SearchView(
                 searchState: searchState,
                 parkingAreaManager: parkingAreaManager,
                 parkingSearchManager: parkingWebSocketManager,
                 parkingEventDetector: parkingEventDetector,
+                exploredPlace: exploredPlace,
                 mapCenter: placesSearchCoordinate,
                 showRecenterButton: cameraController.showRecenterButton,
                 onRecenter: { cameraController.recenter() },
@@ -765,6 +849,14 @@ struct MainNavigationView: View {
                 },
                 onParkingAreaSelected: { area in
                     selectParkingArea(area)
+                },
+                onPlaceExplored: { place in
+                    enterExploreMode(for: place)
+                },
+                onExitExplore: {
+                    CurbyHaptics.light()
+                    exitExploreMode()
+                    cameraController.recenter()
                 },
                 onClearDestination: {
                     CurbyHaptics.light()
@@ -1632,6 +1724,56 @@ private struct PlaceMapPin: View {
                     .frame(width: 14, height: 14)
             }
         }
+    }
+
+    private var tint: Color {
+        HeatZoneGeometry.color(for: place.busyLevel)
+    }
+}
+
+// MARK: - Hover popup ("you're in [place]" prompt above the map)
+
+private struct HoverPlacePopup: View {
+    let place: PopularLocation
+    let onTap: (PopularLocation) -> Void
+
+    var body: some View {
+        Button {
+            onTap(place)
+        } label: {
+            HStack(spacing: 10) {
+                place.icon.fill
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .foregroundStyle(.white)
+                    .frame(width: 14, height: 14)
+                    .frame(width: 28, height: 28)
+                    .background(tint, in: Circle())
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("You're in \(place.name)")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text("Tap to see parking & busy areas")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Ph.caretRight.bold
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 11, height: 11)
+                    .padding(.leading, 2)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .curbyGlassSurface(cornerRadius: 22)
+            .shadow(color: .black.opacity(0.14), radius: 6, y: 3)
+        }
+        .buttonStyle(.plain)
     }
 
     private var tint: Color {

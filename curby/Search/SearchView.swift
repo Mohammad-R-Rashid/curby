@@ -20,6 +20,8 @@ struct SearchView: View {
     let parkingAreaManager: ParkingAreaManager
     let parkingSearchManager: ParkingWebSocketManager
     let parkingEventDetector: ParkingEventDetector
+    /// Place the user is browsing (no destination set). Drives the Explore-mode UI.
+    var exploredPlace: PopularLocation?
     /// Coordinate to use for suggesting local places (updates as map pans)
     var mapCenter: CLLocationCoordinate2D?
     /// Shown when the map is in free-explore mode (user panned away from follow).
@@ -28,6 +30,9 @@ struct SearchView: View {
     var onMarkAsParked: (() -> Void)?
     let onDestinationSelected: (SelectedDestination) -> Void
     let onParkingAreaSelected: (LiveParkingArea) -> Void
+    /// Tapping a Place card / pin enters Explore mode instead of routing.
+    var onPlaceExplored: ((PopularLocation) -> Void)?
+    var onExitExplore: (() -> Void)?
     let onClearDestination: () -> Void
     /// Widen walking geofence when Mapbox returns no POIs in the current radius.
     var onExpandWalkingRadius: (() -> Void)?
@@ -68,6 +73,24 @@ struct SearchView: View {
                         .padding(.bottom, 10)
 
                         liveParkingSection
+
+                        if parkingAreaManager.isLoading {
+                            areaLoadingIndicator
+                        } else if !parkingAreaManager.areas.isEmpty {
+                            nearbyParkingSection
+                        } else if parkingAreaManager.noParkingInGeofence {
+                            noParkingInRadiusSection
+                        } else if let error = parkingAreaManager.lastErrorMessage {
+                            MinimalStatusCard(
+                                title: "Nearby parking unavailable",
+                                icon: .warningCircle,
+                                tint: CurbyGlass.destinationTint,
+                                detail: error
+                            )
+                        }
+                    } else if let place = exploredPlace {
+                        // EXPLORE MODE — browsing parking near a place, no routing.
+                        exploringHeader(for: place)
 
                         if parkingAreaManager.isLoading {
                             areaLoadingIndicator
@@ -350,6 +373,50 @@ struct SearchView: View {
         .padding(.horizontal, 16)
     }
 
+    // MARK: - Explore Mode Header
+
+    private func exploringHeader(for place: PopularLocation) -> some View {
+        HStack(spacing: 12) {
+            place.icon.fill
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .foregroundStyle(.white)
+                .frame(width: 14, height: 14)
+                .frame(width: 30, height: 30)
+                .background(HeatZoneGeometry.color(for: place.busyLevel), in: Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Browsing \(place.name)")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text(place.subtitle)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            Button {
+                CurbyHaptics.light()
+                onExitExplore?()
+            } label: {
+                Ph.x.bold
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 12, height: 12)
+                    .frame(width: 28, height: 28)
+                    .background(.thinMaterial, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Exit place browsing")
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 4)
+    }
+
     // MARK: - Nearby Parking Section
 
     private var noParkingInRadiusSection: some View {
@@ -602,15 +669,7 @@ struct SearchView: View {
                     let placesToDisplay = dynamicPlaces.isEmpty ? PopularLocation.locations(near: mapCenter ?? searchState.userLocation) : dynamicPlaces
                     ForEach(placesToDisplay) { location in
                         Button {
-                            CurbyHaptics.selection()
-                            searchState.selectDestination(
-                                name: location.name,
-                                subtitle: location.subtitle,
-                                coordinate: location.coordinate
-                            )
-                            if let dest = searchState.selectedDestination {
-                                onDestinationSelected(dest)
-                            }
+                            onPlaceExplored?(location)
                         } label: {
                             placeCircle(location: location)
                         }
