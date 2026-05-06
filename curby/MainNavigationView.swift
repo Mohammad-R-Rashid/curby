@@ -54,6 +54,10 @@ struct MainNavigationView: View {
     /// otherwise we'd query Mapbox road features and run an O(surfaces × roads)
     /// pass on every camera tick during a pan.
     @State private var alignZonesTask: Task<Void, Never>?
+    /// Defers heat-zone generation until the camera fly-to has finished.
+    /// Loading polygons mid-flight forces Mapbox to drop style updates and
+    /// stalls the render pipeline (~2s observed) — defer instead.
+    @State private var heatZoneLoadTask: Task<Void, Never>?
 
     // MARK: - Places Pins (shown when no destination is selected)
     @State private var placesForMap: [PopularLocation] = []
@@ -230,8 +234,17 @@ struct MainNavigationView: View {
             focusRecommendation(recommendation)
         }
         .onChange(of: parkingAreaManager.areas.map(\.id)) { _, newIDs in
-            // Rebuild heat zones from real parking POIs
-            heatZoneManager.loadZones(from: parkingAreaManager.areas)
+            // Defer heat-zone generation until after the camera fly-to has
+            // finished. Mapbox can't apply many polygon style updates while the
+            // viewport is animating — it logs "Updated style is ignored due to
+            // runtime changes" and stalls. Sleep slightly longer than
+            // CurbyConstants.cameraTransitionDuration before regenerating.
+            heatZoneLoadTask?.cancel()
+            heatZoneLoadTask = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(1_200))
+                guard !Task.isCancelled else { return }
+                heatZoneManager.loadZones(from: parkingAreaManager.areas)
+            }
 
             guard let selectedParkingArea else { return }
             if

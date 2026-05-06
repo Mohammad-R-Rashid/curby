@@ -278,16 +278,16 @@ final class HeatZoneManager {
 
     // MARK: - Mock Data Generation
 
-    /// Generates heat zones with street-block curb segments + overview areas from real parking POIs.
+    /// Generates heat zones (overview blob only) from real parking POIs.
+    /// Curb-segment and footprint surfaces are deliberately not generated:
+    /// they're mock geometry that adds polygon load without information until
+    /// real busyness data and street-aligned shapes land (reminder #5).
     private static func generateZones(from areas: [LiveParkingArea]) -> [HeatZone] {
         return areas.map { area in
             let zoneID = UUID(uuidString: area.id) ?? UUID()
             let score = Int.random(in: 20...85) // Random until backend real-time density is connected
             let busyLevel = BusyLevel(score: score)
 
-            var surfaces: [ParkingSurface] = []
-
-            // 1. Overview area — larger polygon that's visible when zoomed out
             let overviewSize = 200.0
             let overviewBoundary = HeatZoneGeometry.blockBoundary(
                 center: area.coordinate,
@@ -295,82 +295,17 @@ final class HeatZoneManager {
                 templateIndex: area.id.hashValue % 6,
                 rotation: Double(area.id.hashValue % 45)
             )
-            surfaces.append(ParkingSurface(
-                zoneID: zoneID,
-                name: area.displayName,
-                kind: .overviewArea,
-                busyLevel: busyLevel,
-                polygonCoords: overviewBoundary,
-                sourceReference: area.id
-            ))
 
-            // 2. Street-level curb segments — radiating from the parking area
-            //    Creates 3-4 street segments at different bearings to simulate blocks
-            let segmentBearings: [Double]
-            switch area.kind {
-            case .street:
-                // Street parking: segments along the road in both directions
-                let baseBearing = Double(area.id.hashValue % 180)
-                segmentBearings = [baseBearing, baseBearing + 180, baseBearing + 90, baseBearing + 270]
-            case .garage, .lot:
-                // Structures: segments on surrounding approach streets
-                let baseBearing = Double(area.id.hashValue % 90)
-                segmentBearings = [baseBearing, baseBearing + 90, baseBearing + 180, baseBearing + 270]
-            case .general:
-                let baseBearing = Double(area.id.hashValue % 120)
-                segmentBearings = [baseBearing, baseBearing + 120, baseBearing + 240]
-            }
-
-            for (i, bearing) in segmentBearings.enumerated() {
-                // Offset the segment start from center so they radiate outward
-                let offsetDistance = 30.0 + Double(i * 15)
-                let segmentCenter = HeatZoneGeometry.offsetCoordinate(
-                    from: area.coordinate,
-                    distanceMeters: offsetDistance + 40,
-                    bearingDegrees: bearing
-                )
-
-                // Each curb segment is a thin rectangle (like a painted street line)
-                let segmentLength = 60.0 + Double(i % 3) * 25.0
-                let segmentCoords = HeatZoneGeometry.rectangleBoundary(
-                    center: segmentCenter,
-                    lengthMeters: segmentLength,
-                    widthMeters: 6.0,
-                    rotation: bearing
-                )
-
-                // Vary busy level slightly per segment for visual interest
-                let segmentScore = max(0, min(100, score + Int.random(in: -15...15)))
-                surfaces.append(ParkingSurface(
-                    zoneID: zoneID,
-                    name: "\(area.displayName) — Block \(i + 1)",
-                    kind: .curbSegment,
-                    busyLevel: BusyLevel(score: segmentScore),
-                    polygonCoords: segmentCoords,
-                    sourceReference: area.id
-                ))
-            }
-
-            // 3. Structure footprints for garages and lots
-            if area.kind == .garage || area.kind == .lot {
-                let footprintKind: ParkingSurfaceKind = area.kind == .garage ? .garageFootprint : .lotFootprint
-                let footprintSize = area.kind == .garage ? 45.0 : 55.0
-                let footprintWidth = area.kind == .garage ? 30.0 : 40.0
-                let footprintCoords = HeatZoneGeometry.rectangleBoundary(
-                    center: area.coordinate,
-                    lengthMeters: footprintSize,
-                    widthMeters: footprintWidth,
-                    rotation: Double(area.id.hashValue % 30)
-                )
-                surfaces.append(ParkingSurface(
+            let surfaces: [ParkingSurface] = [
+                ParkingSurface(
                     zoneID: zoneID,
                     name: area.displayName,
-                    kind: footprintKind,
+                    kind: .overviewArea,
                     busyLevel: busyLevel,
-                    polygonCoords: footprintCoords,
+                    polygonCoords: overviewBoundary,
                     sourceReference: area.id
-                ))
-            }
+                )
+            ]
 
             let spot = ParkingSpot(
                 id: zoneID,
