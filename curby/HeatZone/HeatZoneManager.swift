@@ -35,6 +35,12 @@ final class HeatZoneManager {
 
     // MARK: - Public
 
+    /// Maximum number of POIs we materialize as heat zones at once. Each zone
+    /// expands into ~5 polygons and gets a road-alignment pass, so dense areas
+    /// (24+ POIs) used to lock up the main thread. Heat-zone scores are still
+    /// mock for now; this cap is revisited when real busyness data lands.
+    private static let maxHeatZones: Int = 10
+
     /// Load heat zones strictly around real, live parking POIs.
     func loadZones(
         from parkingAreas: [LiveParkingArea]
@@ -43,8 +49,11 @@ final class HeatZoneManager {
         alignedStreetSurfaceReferences = []
         alignedStructureSurfaceReferences = []
 
+        // parkingAreas arrives sorted by distance — keep the closest N.
+        let limited = Array(parkingAreas.prefix(Self.maxHeatZones))
+
         Task { @MainActor in
-            heatZones = Self.generateZones(from: parkingAreas)
+            heatZones = Self.generateZones(from: limited)
             isLoading = false
         }
     }

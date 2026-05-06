@@ -50,6 +50,10 @@ struct MainNavigationView: View {
     @State private var currentMapZoom: Double = CurbyConstants.zoomDefault
     @State private var lastHeatZoneLoadCenter: CLLocationCoordinate2D?
     @State private var placesSearchCoordinate: CLLocationCoordinate2D?
+    /// Coalesces zone-alignment work to only run after the camera settles —
+    /// otherwise we'd query Mapbox road features and run an O(surfaces × roads)
+    /// pass on every camera tick during a pan.
+    @State private var alignZonesTask: Task<Void, Never>?
 
     // MARK: - Places Pins (shown when no destination is selected)
     @State private var placesForMap: [PopularLocation] = []
@@ -455,24 +459,42 @@ struct MainNavigationView: View {
                 )
             }
             .onCameraChanged { change in
-                currentMapZoom = change.cameraState.zoom
+                let newZoom = change.cameraState.zoom
+                // Quantize zoom updates to 0.2-step deltas so the entire mapView
+                // body doesn't recompute (and rebuild ~120 zone polygons) on
+                // every fractional tick during a pinch/zoom.
+                if abs(newZoom - currentMapZoom) >= 0.2 {
+                    currentMapZoom = newZoom
+                }
                 let center = change.cameraState.center
 
                 // Update places bar if zoomed in enough
-                if change.cameraState.zoom >= 10.0 {
+                if newZoom >= 10.0 {
                     placesSearchCoordinate = center
                     if searchState.selectedDestination == nil {
                         updatePlacesForMap(center: center)
                     }
                 }
 
-                detectHoveredPlace(at: center, zoom: change.cameraState.zoom)
-                alignZonesIfNeeded(proxy: proxy, zoom: change.cameraState.zoom)
+                detectHoveredPlace(at: center, zoom: newZoom)
+                scheduleZoneAlignment(proxy: proxy, zoom: newZoom)
             }
         }
     }
 
     // MARK: - Zone Alignment
+
+    /// Run alignZonesIfNeeded only after the camera has been still for ~250ms.
+    /// During an active pan/zoom we'd otherwise pile up MapBox source queries
+    /// and main-actor alignment work on every tick.
+    private func scheduleZoneAlignment(proxy: MapboxMaps.MapProxy, zoom: Double) {
+        alignZonesTask?.cancel()
+        alignZonesTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            alignZonesIfNeeded(proxy: proxy, zoom: zoom)
+        }
+    }
 
     private func alignZonesIfNeeded(proxy: MapboxMaps.MapProxy, zoom: Double) {
         guard let map = proxy.map else { return }
