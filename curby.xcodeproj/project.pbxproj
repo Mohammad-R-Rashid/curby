@@ -7,11 +7,21 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		3AAA8DA82FAB182400640B17 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3AAA8DA72FAB182400640B17 /* WidgetKit.framework */; };
+		3AAA8DAA2FAB182400640B17 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3AAA8DA92FAB182400640B17 /* SwiftUI.framework */; };
+		3AAA8DB72FAB182500640B17 /* CurbyLiveActivityExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 3AAA8DA52FAB182400640B17 /* CurbyLiveActivityExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		89A1B2C32F9500AA00660AE9 /* PhosphorSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 89A1B2C42F9500AA00660AE9 /* PhosphorSwift */; };
 		89EE5FB72F94197500804594 /* MapboxMaps in Frameworks */ = {isa = PBXBuildFile; productRef = 894496302F93FB0100026B35 /* MapboxMaps */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		3AAA8DB52FAB182500640B17 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 894495EB2F93FA2200026B35 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 3AAA8DA42FAB182400640B17;
+			remoteInfo = CurbyLiveActivityExtension;
+		};
 		894496012F93FA2400026B35 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 894495EB2F93FA2200026B35 /* Project object */;
@@ -28,13 +38,48 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		3AAA8DB82FAB182500640B17 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				3AAA8DB72FAB182500640B17 /* CurbyLiveActivityExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		3AAA8DA52FAB182400640B17 /* CurbyLiveActivityExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CurbyLiveActivityExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		3AAA8DA72FAB182400640B17 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		3AAA8DA92FAB182400640B17 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		894495F32F93FA2200026B35 /* curby.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = curby.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		894496002F93FA2400026B35 /* curbyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = curbyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		8944960A2F93FA2400026B35 /* curbyUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = curbyUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		3AAA8DBB2FAB182500640B17 /* Exceptions for "CurbyLiveActivity" folder in "CurbyLiveActivityExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 3AAA8DA42FAB182400640B17 /* CurbyLiveActivityExtension */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		3AAA8DAB2FAB182400640B17 /* CurbyLiveActivity */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				3AAA8DBB2FAB182500640B17 /* Exceptions for "CurbyLiveActivity" folder in "CurbyLiveActivityExtension" target */,
+			);
+			path = CurbyLiveActivity;
+			sourceTree = "<group>";
+		};
 		894495F52F93FA2200026B35 /* curby */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = curby;
@@ -53,6 +98,15 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		3AAA8DA22FAB182400640B17 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3AAA8DAA2FAB182400640B17 /* SwiftUI.framework in Frameworks */,
+				3AAA8DA82FAB182400640B17 /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		894495F02F93FA2200026B35 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -79,12 +133,23 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		3AAA8DA62FAB182400640B17 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				3AAA8DA72FAB182400640B17 /* WidgetKit.framework */,
+				3AAA8DA92FAB182400640B17 /* SwiftUI.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		894495EA2F93FA2200026B35 = {
 			isa = PBXGroup;
 			children = (
 				894495F52F93FA2200026B35 /* curby */,
 				894496032F93FA2400026B35 /* curbyTests */,
 				8944960D2F93FA2400026B35 /* curbyUITests */,
+				3AAA8DAB2FAB182400640B17 /* CurbyLiveActivity */,
+				3AAA8DA62FAB182400640B17 /* Frameworks */,
 				894495F42F93FA2200026B35 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -95,6 +160,7 @@
 				894495F32F93FA2200026B35 /* curby.app */,
 				894496002F93FA2400026B35 /* curbyTests.xctest */,
 				8944960A2F93FA2400026B35 /* curbyUITests.xctest */,
+				3AAA8DA52FAB182400640B17 /* CurbyLiveActivityExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -102,6 +168,28 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		3AAA8DA42FAB182400640B17 /* CurbyLiveActivityExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3AAA8DBC2FAB182500640B17 /* Build configuration list for PBXNativeTarget "CurbyLiveActivityExtension" */;
+			buildPhases = (
+				3AAA8DA12FAB182400640B17 /* Sources */,
+				3AAA8DA22FAB182400640B17 /* Frameworks */,
+				3AAA8DA32FAB182400640B17 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				3AAA8DAB2FAB182400640B17 /* CurbyLiveActivity */,
+			);
+			name = CurbyLiveActivityExtension;
+			packageProductDependencies = (
+			);
+			productName = CurbyLiveActivityExtension;
+			productReference = 3AAA8DA52FAB182400640B17 /* CurbyLiveActivityExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		894495F22F93FA2200026B35 /* curby */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 894496142F93FA2400026B35 /* Build configuration list for PBXNativeTarget "curby" */;
@@ -109,10 +197,12 @@
 				894495EF2F93FA2200026B35 /* Sources */,
 				894495F02F93FA2200026B35 /* Frameworks */,
 				894495F12F93FA2200026B35 /* Resources */,
+				3AAA8DB82FAB182500640B17 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				3AAA8DB62FAB182500640B17 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				894495F52F93FA2200026B35 /* curby */,
@@ -179,9 +269,12 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2630;
+				LastSwiftUpdateCheck = 2640;
 				LastUpgradeCheck = 2630;
 				TargetAttributes = {
+					3AAA8DA42FAB182400640B17 = {
+						CreatedOnToolsVersion = 26.4.1;
+					};
 					894495F22F93FA2200026B35 = {
 						CreatedOnToolsVersion = 26.3;
 					};
@@ -216,11 +309,19 @@
 				894495F22F93FA2200026B35 /* curby */,
 				894495FF2F93FA2400026B35 /* curbyTests */,
 				894496092F93FA2400026B35 /* curbyUITests */,
+				3AAA8DA42FAB182400640B17 /* CurbyLiveActivityExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		3AAA8DA32FAB182400640B17 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		894495F12F93FA2200026B35 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -245,6 +346,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		3AAA8DA12FAB182400640B17 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		894495EF2F93FA2200026B35 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -269,6 +377,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		3AAA8DB62FAB182500640B17 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 3AAA8DA42FAB182400640B17 /* CurbyLiveActivityExtension */;
+			targetProxy = 3AAA8DB52FAB182500640B17 /* PBXContainerItemProxy */;
+		};
 		894496022F93FA2400026B35 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 894495F22F93FA2200026B35 /* curby */;
@@ -282,6 +395,68 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		3AAA8DB92FAB182500640B17 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = N9J82G33L9;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = CurbyLiveActivity/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = CurbyLiveActivity;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hackmsa.curby.CurbyLiveActivity;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		3AAA8DBA2FAB182500640B17 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = N9J82G33L9;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = CurbyLiveActivity/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = CurbyLiveActivity;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.hackmsa.curby.CurbyLiveActivity;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		894496122F93FA2400026B35 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -552,6 +727,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		3AAA8DBC2FAB182500640B17 /* Build configuration list for PBXNativeTarget "CurbyLiveActivityExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3AAA8DB92FAB182500640B17 /* Debug */,
+				3AAA8DBA2FAB182500640B17 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		894495EE2F93FA2200026B35 /* Build configuration list for PBXProject "curby" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
