@@ -30,6 +30,7 @@ struct MainNavigationView: View {
     @State private var parkingEventDetector: ParkingEventDetector
     @State private var parkingWebSocketManager: ParkingWebSocketManager
     @State private var searchState = SearchState()
+    @State private var liveActivityController = LiveParkingActivityController()
 
     // MARK: - Sheet State
 
@@ -226,6 +227,7 @@ struct MainNavigationView: View {
             telemetryUploader.updateLatestSample(location: newLoc, heading: locationService.currentHeading)
             parkingEventDetector.updateLatestLocation(newLoc)
             parkingWebSocketManager.updateCurrentLocation(newLoc?.coordinate)
+            liveActivityController.update(currentLocation: newLoc)
         }
         .onChange(of: parkingWebSocketManager.activeSessionID) { _, _ in
             guard let recommendation = parkingWebSocketManager.activeRecommendation else {
@@ -685,6 +687,7 @@ struct MainNavigationView: View {
         selectedParkingArea = nil
         parkingAreaManager.clear()
         heatZoneManager.clearZones()
+        liveActivityController.end()
         sheetDetent = .fraction(0.30)
     }
 
@@ -905,6 +908,7 @@ struct MainNavigationView: View {
                     Task { await parkingWebSocketManager.cancelSearch() }
                     parkingAreaManager.clear()
                     heatZoneManager.clearZones()
+                    liveActivityController.end()
                     customPinCoordinate = nil
                     selectedParkingArea = nil
                     cameraController.recenter()
@@ -995,12 +999,54 @@ struct MainNavigationView: View {
 
     private func openInMaps(coordinate: CLLocationCoordinate2D, name: String) {
         CurbyHaptics.light()
+
+        // Start (or restart) the Live Activity / Dynamic Island session for
+        // the trip before handing off to Apple Maps. Curby will be backgrounded
+        // while Apple Maps does turn-by-turn; the activity is what keeps the
+        // parking + busyness context visible on top.
+        startLiveActivityForNavigation(parkingCoordinate: coordinate, parkingName: name)
+
         let placemark = MKPlacemark(coordinate: coordinate)
         let mapItem = MKMapItem(placemark: placemark)
         mapItem.name = name
         mapItem.openInMaps(launchOptions: [
             MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving
         ])
+    }
+
+    private func startLiveActivityForNavigation(
+        parkingCoordinate: CLLocationCoordinate2D,
+        parkingName: String
+    ) {
+        // Resolve what we treat as the trip destination (where the
+        // walking-radius geofence is anchored). Prefer an explicit destination,
+        // then the current Explore-mode place, then fall back to the parking
+        // itself (covers "navigate to a parking pin without a destination set").
+        let destinationName: String
+        let destinationCoordinate: CLLocationCoordinate2D
+        if let dest = searchState.selectedDestination {
+            destinationName = dest.name
+            destinationCoordinate = dest.coordinate
+        } else if let place = exploredPlace {
+            destinationName = place.name
+            destinationCoordinate = place.coordinate
+        } else {
+            destinationName = parkingName
+            destinationCoordinate = parkingCoordinate
+        }
+
+        let busynessLabel = parkingWebSocketManager.activeRecommendation?.matchQualityShortLabel
+            ?? "Open"
+
+        liveActivityController.start(
+            destinationName: destinationName,
+            destinationCoordinate: destinationCoordinate,
+            parkingName: parkingName,
+            parkingCoordinate: parkingCoordinate,
+            walkingRadiusMeters: walkingGeofenceMeters,
+            currentLocation: locationService.currentLocation,
+            busynessLabel: busynessLabel
+        )
     }
 
     // MARK: - Camera Setup
