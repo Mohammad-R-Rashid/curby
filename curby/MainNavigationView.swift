@@ -493,6 +493,9 @@ struct MainNavigationView: View {
 
                 if newZoom >= 10.0, centerMovedSignificantly {
                     placesSearchCoordinate = center
+                    // Bias typed search to where the user is exploring, not
+                    // just where they physically are.
+                    searchState.mapCenter = center
                     if searchState.selectedDestination == nil {
                         placesService.fetchIfNeeded(near: center)
                     }

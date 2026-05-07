@@ -2,7 +2,9 @@
 //  SearchState.swift
 //  curby
 //
-//  Search logic — manages text input, OSM Nominatim geocoding, and recents.
+//  Search logic — manages text input, Mapbox SearchBox forward geocoding,
+//  and recents. Proximity-biased: results are ranked relative to the map
+//  center the user is looking at (or their current location as fallback).
 //
 
 import CoreLocation
@@ -23,15 +25,32 @@ struct RecentDestination: Identifiable, Codable, Hashable {
     }
 }
 
-private struct NominatimSearchItem: Decodable {
-    let lat: String
-    let lon: String
-    let displayName: String
-    let name: String?
+// MARK: - Mapbox forward decoder
 
-    enum CodingKeys: String, CodingKey {
-        case lat, lon, name
-        case displayName = "display_name"
+private struct MapboxForwardResponse: Decodable {
+    let features: [Feature]
+
+    struct Feature: Decodable {
+        let geometry: Geometry?
+        let properties: Properties
+
+        struct Geometry: Decodable {
+            let coordinates: [Double]
+        }
+
+        struct Properties: Decodable {
+            let name: String?
+            let placeFormatted: String?
+            let featureType: String?
+            let mapboxID: String?
+
+            private enum CodingKeys: String, CodingKey {
+                case name
+                case placeFormatted = "place_formatted"
+                case featureType = "feature_type"
+                case mapboxID = "mapbox_id"
+            }
+        }
     }
 }
 
@@ -62,6 +81,14 @@ final class SearchState {
     /// User's current location for proximity-biased ordering.
     var userLocation: CLLocationCoordinate2D?
 
+    /// Map center the user is currently looking at. Preferred over
+    /// `userLocation` for proximity bias when set, since it reflects what
+    /// the user is exploring rather than where they physically are.
+    /// Observation-ignored — set frequently from camera changes; we don't
+    /// want every keystroke-irrelevant map pan to trigger a SearchView
+    /// recompute.
+    @ObservationIgnored var mapCenter: CLLocationCoordinate2D?
+
     // MARK: - Private
 
     private var searchTask: Task<Void, Never>?
@@ -75,7 +102,8 @@ final class SearchState {
 
     // MARK: - Search
 
-    /// Called when search text changes. Debounces and queries Nominatim.
+    /// Called when search text changes. Debounces and queries Mapbox
+    /// SearchBox forward, biased toward the map center the user is looking at.
     func onSearchTextChanged() {
         searchTask?.cancel()
 
@@ -87,97 +115,96 @@ final class SearchState {
         }
 
         isSearching = true
+        let proximity = mapCenter ?? userLocation
 
         searchTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(Int(CurbyConstants.searchDebounceInterval * 1000)))
             guard !Task.isCancelled else { return }
 
-            let results = await geocodeNominatim(query: query)
+            let results = await geocodeMapbox(query: query, proximity: proximity)
             guard !Task.isCancelled else { return }
             searchResults = results
             isSearching = false
         }
     }
 
-    // MARK: - Nominatim (OpenStreetMap)
+    // MARK: - Mapbox SearchBox forward
 
-    private func geocodeNominatim(query: String) async -> [SearchResult] {
-        var components = URLComponents(string: "https://nominatim.openstreetmap.org/search")
-        components?.queryItems = [
+    private func geocodeMapbox(
+        query: String,
+        proximity: CLLocationCoordinate2D?
+    ) async -> [SearchResult] {
+        guard let token = Bundle.main.object(forInfoDictionaryKey: "MBXAccessToken") as? String,
+              !token.isEmpty
+        else { return [] }
+
+        var components = URLComponents(string: "https://api.mapbox.com/search/searchbox/v1/forward")
+        var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "q", value: query),
-            URLQueryItem(name: "format", value: "jsonv2"),
-            URLQueryItem(name: "limit", value: "12"),
-            URLQueryItem(name: "addressdetails", value: "1"),
-            URLQueryItem(name: "countrycodes", value: "us"),
+            URLQueryItem(name: "access_token", value: token),
+            URLQueryItem(name: "language", value: "en"),
+            URLQueryItem(name: "limit", value: "10"),
+            // Mix area-scale (neighborhood/locality/district/place) with
+            // specific destinations (address/street/poi) so a single call
+            // covers both Hotspots and Locations downstream.
+            URLQueryItem(name: "types", value: "neighborhood,locality,district,place,address,street,poi"),
         ]
+        if let proximity {
+            queryItems.append(URLQueryItem(
+                name: "proximity",
+                value: "\(proximity.longitude),\(proximity.latitude)"
+            ))
+        }
+        components?.queryItems = queryItems
 
         guard let url = components?.url else { return [] }
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.setValue(CurbyConstants.nominatimUserAgent, forHTTPHeaderField: "User-Agent")
-        request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
         request.timeoutInterval = 12
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
-
-            guard let httpResponse = response as? HTTPURLResponse,
-                  (200 ... 299).contains(httpResponse.statusCode)
+            guard let http = response as? HTTPURLResponse,
+                  (200 ... 299).contains(http.statusCode)
             else { return [] }
 
-            let items = try JSONDecoder().decode([NominatimSearchItem].self, from: data)
+            let decoded = try JSONDecoder().decode(MapboxForwardResponse.self, from: data)
 
-            var seen = Set<String>()
+            var seenIDs = Set<String>()
             var results: [SearchResult] = []
-            results.reserveCapacity(items.count)
+            results.reserveCapacity(decoded.features.count)
 
-            for item in items {
-                guard let lat = Double(item.lat),
-                      let lon = Double(item.lon)
-                else { continue }
+            for feature in decoded.features {
+                guard let coords = feature.geometry?.coordinates,
+                      coords.count >= 2 else { continue }
+                let coordinate = CLLocationCoordinate2D(
+                    latitude: coords[1],
+                    longitude: coords[0]
+                )
+                let id = feature.properties.mapboxID ?? UUID().uuidString
+                guard seenIDs.insert(id).inserted else { continue }
 
-                let coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lon)
-
-                let key = String(format: "%.4f,%.4f", lat, lon)
-                guard seen.insert(key).inserted else { continue }
-
-                let primary = (item.name?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
-                    ?? primaryName(from: item.displayName)
-
-                let subtitle = subtitleFromDisplayName(item.displayName, excludingPrimary: primary)
+                let name = (feature.properties.name?.trimmingCharacters(in: .whitespacesAndNewlines))
+                    ?? "Untitled"
+                let subtitle = feature.properties.placeFormatted ?? ""
 
                 results.append(
                     SearchResult(
                         id: UUID(),
-                        name: primary,
+                        name: name,
                         subtitle: subtitle,
-                        coordinate: coordinate
+                        coordinate: coordinate,
+                        featureType: feature.properties.featureType
                     )
                 )
             }
 
-            // Keep Nominatim relevance order (do not re-sort by distance — hurts ranking for partial queries).
-            return Array(results.prefix(10))
+            return results
         } catch {
-            print("[SearchState] Nominatim error: \(error.localizedDescription)")
+            print("[SearchState] Mapbox forward error: \(error.localizedDescription)")
             return []
         }
-    }
-
-    private func primaryName(from displayName: String) -> String {
-        let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let comma = trimmed.firstIndex(of: ",") else { return trimmed }
-        return String(trimmed[..<comma]).trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func subtitleFromDisplayName(_ displayName: String, excludingPrimary primary: String) -> String {
-        let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.hasPrefix(primary + ",") {
-            let rest = trimmed.dropFirst(primary.count).drop(while: { $0 == "," || $0 == " " })
-            return String(rest)
-        }
-        return trimmed
     }
 
     // MARK: - Selection
@@ -247,6 +274,18 @@ struct SearchResult: Identifiable, Hashable {
     let name: String
     let subtitle: String
     let coordinate: CLLocationCoordinate2D
+    /// Mapbox `feature_type` — drives downstream sectioning (Hotspots vs
+    /// Locations) and the mode handoff (area-scale picks open Explore mode;
+    /// addresses/POIs open Destination mode).
+    let featureType: String?
+
+    init(id: UUID, name: String, subtitle: String, coordinate: CLLocationCoordinate2D, featureType: String? = nil) {
+        self.id = id
+        self.name = name
+        self.subtitle = subtitle
+        self.coordinate = coordinate
+        self.featureType = featureType
+    }
 
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
