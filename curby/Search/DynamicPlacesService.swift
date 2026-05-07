@@ -47,7 +47,8 @@ final class DynamicPlacesService {
     /// POI categories that count as a "hotspot" — area-scale destinations
     /// drivers recognize. Anything outside this set (restaurants, cafes,
     /// banks, gas stations, schools, gyms, etc.) is dropped.
-    private static let allowedCategories: Set<MKPointOfInterestCategory> = [
+    /// `nonisolated` so per-query TaskGroup closures can read it.
+    private nonisolated static let allowedCategories: Set<MKPointOfInterestCategory> = [
         .airport,
         .amusementPark,
         .aquarium,
@@ -70,7 +71,10 @@ final class DynamicPlacesService {
     /// signal for `.park` results (a "regional park" query inherently asks
     /// for larger parks; an incidental park result from a "downtown" query
     /// is held to a stricter bar).
-    private static func shouldKeep(_ item: MKMapItem, query: String) -> Bool {
+    ///
+    /// `nonisolated` so it can run inside the per-query TaskGroup closures,
+    /// which execute off the MainActor.
+    private nonisolated static func shouldKeep(_ item: MKMapItem, query: String) -> Bool {
         // Reject if Apple categorized it but the category isn't on our list
         // (this drops restaurants, cafes, banks, schools, gas stations, etc.).
         if let category = item.pointOfInterestCategory {
