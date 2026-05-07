@@ -59,35 +59,36 @@ final class DynamicPlacesService {
         .university,
         .zoo,
         .publicTransport,
-        .park,            // Filtered further below — small parks rejected by name heuristic.
+        .park,            // Park results filtered further by signals (see shouldKeep).
         .marina,
-    ]
-
-    /// Names that look like community/neighborhood parks (e.g. "Maple Park",
-    /// "Oak Street Park") are dropped. A park is kept when its name contains
-    /// any of these popularity markers — covers Golden Gate Park, Central
-    /// Park, Forest Park, Yosemite National Park, etc.
-    private static let bigParkMarkers: [String] = [
-        "national park", "state park", "regional park",
-        "central park", "golden gate", "forest park",
-        "balboa park", "griffith park", "presidio",
-        "memorial park", "city park", "lincoln park",
     ]
 
     /// True when an MKMapItem is "hotspot worthy" — an area-scale landmark
     /// rather than a specific business or community-scale park.
-    private static func shouldKeep(_ item: MKMapItem) -> Bool {
+    ///
+    /// `query` is the landmark query that produced the item; we use it as a
+    /// signal for `.park` results (a "regional park" query inherently asks
+    /// for larger parks; an incidental park result from a "downtown" query
+    /// is held to a stricter bar).
+    private static func shouldKeep(_ item: MKMapItem, query: String) -> Bool {
         // Reject if Apple categorized it but the category isn't on our list
         // (this drops restaurants, cafes, banks, schools, gas stations, etc.).
         if let category = item.pointOfInterestCategory {
             guard allowedCategories.contains(category) else { return false }
 
             // Apple lumps community parks and famous parks into `.park`.
-            // Keep only ones whose name contains a popularity marker.
+            // Keep only ones with a real popularity signal — no hardcoded
+            // names. Two dynamic signals are accepted:
+            //  - The originating query was already targeting larger parks
+            //    ("regional park", "state park", "national park").
+            //  - The place has an official website URL. Community parks
+            //    almost never do; well-known city parks reliably do.
             if category == .park {
-                let nameLower = (item.name ?? "").lowercased()
-                let hasMarker = bigParkMarkers.contains(where: { nameLower.contains($0) })
-                if !hasMarker { return false }
+                let queryLower = query.lowercased()
+                let queryAimsLargePark = ["regional park", "state park", "national park"]
+                    .contains(where: queryLower.contains)
+                let hasOfficialURL = item.url != nil
+                if !queryAimsLargePark && !hasOfficialURL { return false }
             }
         }
         // No category means we can't reason about it — be conservative and
@@ -141,7 +142,7 @@ final class DynamicPlacesService {
 
                     return response.mapItems
                         .compactMap { item -> PopularLocation? in
-                            guard Self.shouldKeep(item) else { return nil }
+                            guard Self.shouldKeep(item, query: entry.query) else { return nil }
                             return PopularLocation(
                                 id: UUID(),
                                 name: item.name ?? entry.query.capitalized,
