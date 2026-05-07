@@ -56,10 +56,13 @@ struct LiveParkingArea: Identifiable, Hashable {
     }
 
     /// Rough walk time from the trip destination to this spot (when distance is known).
+    /// Uses the great-circle distance times the walking-route detour factor so
+    /// the displayed minutes reflect actually following streets, not a straight line.
     var estimatedWalkMinutesFromDestination: Int? {
         guard let meters = destinationDistanceMeters, meters > 0 else { return nil }
+        let walkingMeters = meters * CurbyConstants.walkingRouteDetourFactor
         // ~1.35 m/s average walking pace
-        return max(1, Int((meters / 1.35 / 60).rounded()))
+        return max(1, Int((walkingMeters / 1.35 / 60).rounded()))
     }
 
     var primaryHoursText: String? {

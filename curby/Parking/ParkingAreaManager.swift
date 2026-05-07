@@ -175,8 +175,12 @@ final class ParkingAreaManager {
             return collected
         }
 
-        // Names to filter out — these are bike lockers, not real parking
-        let blockedPrefixes = ["bikelink", "bike link", "scooter"]
+        // Mapbox tags BikeLink and similar bike/scooter lockers under the
+        // `parking_lot` category (verified against San Jose City Hall — the
+        // first result is literally "BikeLink : City Hall Wedges"). Match
+        // them anywhere in the name, not just at the start, so renames like
+        // "City Hall - BikeLink" can't slip through.
+        let blockedSubstrings = ["bikelink", "bike link", "bike rack", "bicycle rack", "scooter"]
 
         let results = allFeatures.compactMap { feature -> LiveParkingArea? in
             let name = feature.properties.name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -184,8 +188,8 @@ final class ParkingAreaManager {
 
             // Filter out non-parking POIs
             let nameLower = name.lowercased()
-            for prefix in blockedPrefixes {
-                if nameLower.hasPrefix(prefix) { return nil }
+            for substring in blockedSubstrings {
+                if nameLower.contains(substring) { return nil }
             }
 
             let baseCoordinate = CLLocationCoordinate2D(
@@ -204,7 +208,10 @@ final class ParkingAreaManager {
                 longitude: navigationCoordinate.longitude
             ))
 
-            guard destinationDistanceMeters <= walkingRadiusMeters + CurbyConstants.parkingGeofenceToleranceMeters else {
+            // Compare estimated walking-route distance (not great-circle) to
+            // the user's walking radius — see walkingRouteDetourFactor.
+            let estimatedWalkingMeters = destinationDistanceMeters * CurbyConstants.walkingRouteDetourFactor
+            guard estimatedWalkingMeters <= walkingRadiusMeters + CurbyConstants.parkingGeofenceToleranceMeters else {
                 return nil
             }
 

@@ -102,6 +102,14 @@ enum CurbyConstants {
     static let metersPerMile: Double = 1_609.344
     static let parkingGeofenceToleranceMeters: Double = 25.0
 
+    /// Multiplier that approximates real walking-route distance from a
+    /// great-circle straight line. Cities force pedestrians around buildings
+    /// and onto street grids, so actual walking distance is ~30–50% longer
+    /// than the as-the-crow-flies number `CLLocation.distance(from:)` returns.
+    /// Applied to both the in-radius parking filter and the displayed walk-time
+    /// estimate so they match what a user actually experiences on foot.
+    static let walkingRouteDetourFactor: Double = 1.4
+
     // MARK: - Parking Geometry Detail
 
     /// At and above this zoom, parking zones start resolving into street-level geometry.
