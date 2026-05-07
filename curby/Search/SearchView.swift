@@ -11,7 +11,7 @@ import SwiftUI
 
 /// Sheet content that fully adapts based on app state.
 ///
-/// - **No destination**: Search bar + Places + Recents (Apple Maps style)
+/// - **No destination**: Search bar + Hotspots + Recents (Apple Maps style)
 /// - **Destination selected**: Destination card + Navigate button + Parking Zones
 /// - Typing always shows geocoding results
 struct SearchView: View {
@@ -647,11 +647,11 @@ struct SearchView: View {
         )
     }
 
-    // MARK: - Places Section (Liquid Glass circles)
+    // MARK: - Hotspots Section (Liquid Glass circles)
 
     private var placesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(title: "Places", icon: .mapPinArea)
+            sectionHeader(title: "Hotspots", icon: .mapPinArea)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {

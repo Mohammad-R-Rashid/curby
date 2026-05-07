@@ -28,18 +28,74 @@ final class DynamicPlacesService {
     /// Don't refetch while panning inside this radius of the last fetch.
     private let refetchDistanceMeters: Double = 1_500
     /// Broad landmark query buckets. The first three run per fetch.
+    /// Wording is biased toward area-scale POIs (downtowns, districts, large
+    /// parks, major attractions) — we want the hotspots a driver would
+    /// recognize, not individual restaurants or community parks.
     private static let landmarkQueries: [(query: String, icon: Ph)] = [
         ("downtown",          .buildings),
-        ("park",              .tree),
+        ("regional park",     .tree),
         ("shopping district", .bag),
         ("university",        .graduationCap),
         ("museum",            .ticket),
         ("stadium",           .speakerHifi),
-        ("hospital",          .firstAid),
         ("airport",           .airplane),
         ("mall",              .storefront),
         ("beach",             .umbrella),
+        ("national park",     .tree),
     ]
+
+    /// POI categories that count as a "hotspot" — area-scale destinations
+    /// drivers recognize. Anything outside this set (restaurants, cafes,
+    /// banks, gas stations, schools, gyms, etc.) is dropped.
+    private static let allowedCategories: Set<MKPointOfInterestCategory> = [
+        .airport,
+        .amusementPark,
+        .aquarium,
+        .beach,
+        .museum,
+        .nationalPark,
+        .stadium,
+        .theater,
+        .university,
+        .zoo,
+        .publicTransport,
+        .park,            // Filtered further below — small parks rejected by name heuristic.
+        .marina,
+    ]
+
+    /// Names that look like community/neighborhood parks (e.g. "Maple Park",
+    /// "Oak Street Park") are dropped. A park is kept when its name contains
+    /// any of these popularity markers — covers Golden Gate Park, Central
+    /// Park, Forest Park, Yosemite National Park, etc.
+    private static let bigParkMarkers: [String] = [
+        "national park", "state park", "regional park",
+        "central park", "golden gate", "forest park",
+        "balboa park", "griffith park", "presidio",
+        "memorial park", "city park", "lincoln park",
+    ]
+
+    /// True when an MKMapItem is "hotspot worthy" — an area-scale landmark
+    /// rather than a specific business or community-scale park.
+    private static func shouldKeep(_ item: MKMapItem) -> Bool {
+        // Reject if Apple categorized it but the category isn't on our list
+        // (this drops restaurants, cafes, banks, schools, gas stations, etc.).
+        if let category = item.pointOfInterestCategory {
+            guard allowedCategories.contains(category) else { return false }
+
+            // Apple lumps community parks and famous parks into `.park`.
+            // Keep only ones whose name contains a popularity marker.
+            if category == .park {
+                let nameLower = (item.name ?? "").lowercased()
+                let hasMarker = bigParkMarkers.contains(where: { nameLower.contains($0) })
+                if !hasMarker { return false }
+            }
+        }
+        // No category means we can't reason about it — be conservative and
+        // require the name to be reasonably substantial (drops single-word
+        // generic entries that often slip through).
+        if (item.name ?? "").count < 4 { return false }
+        return true
+    }
 
     /// Schedule a fetch if the center has moved beyond `refetchDistanceMeters`
     /// since the last successful fetch. Cancel + reschedule any in-flight task.
@@ -83,17 +139,23 @@ final class DynamicPlacesService {
                         return []
                     }
 
-                    return response.mapItems.prefix(3).map { item in
-                        PopularLocation(
-                            id: UUID(),
-                            name: item.name ?? entry.query.capitalized,
-                            icon: entry.icon,
-                            coordinate: item.placemark.coordinate,
-                            // Neutral until real busyness data lands (reminder #5).
-                            busyLevel: .open,
-                            subtitle: item.placemark.locality ?? item.placemark.subLocality ?? "Nearby"
-                        )
-                    }
+                    return response.mapItems
+                        .compactMap { item -> PopularLocation? in
+                            guard Self.shouldKeep(item) else { return nil }
+                            return PopularLocation(
+                                id: UUID(),
+                                name: item.name ?? entry.query.capitalized,
+                                icon: entry.icon,
+                                coordinate: item.placemark.coordinate,
+                                // Neutral until real busyness data lands (#5).
+                                // Color-coded chip stays in the UI; the level
+                                // here will eventually be backed by real data.
+                                busyLevel: .open,
+                                subtitle: item.placemark.locality ?? item.placemark.subLocality ?? "Nearby"
+                            )
+                        }
+                        .prefix(3)
+                        .map { $0 }
                 }
             }
 
