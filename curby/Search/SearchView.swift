@@ -38,24 +38,10 @@ struct SearchView: View {
     var onExpandWalkingRadius: (() -> Void)?
 
     @FocusState private var isSearchFocused: Bool
-    
-    // Dynamic POI State
-    @State private var dynamicPlaces: [PopularLocation] = []
-    @State private var placesFetchTask: Task<Void, Never>?
-    /// Last map center we successfully fetched dynamic places for. Used to skip
-    /// re-fetching while the user pans within the same area (Apple throttles
-    /// MKLocalSearch at 50 requests / 60 seconds, and each fetch fires several).
-    @State private var lastFetchedCenter: CLLocationCoordinate2D?
 
-    /// Don't refetch dynamic Places unless the map center has moved at least
-    /// this far from the last successful fetch.
-    private static let dynamicPlacesRefetchDistanceMeters: Double = 1_500
-
-    private var isBrowseMode: Bool {
-        searchState.selectedDestination == nil
-            && exploredPlace == nil
-            && !searchState.isSearchActive
-    }
+    /// Dynamic landmark/area places, owned by DynamicPlacesService in the
+    /// parent view and passed in here.
+    var dynamicPlaces: [PopularLocation] = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -134,21 +120,6 @@ struct SearchView: View {
                 .padding(.top, 16)
             }
             .scrollDismissesKeyboard(.interactively)
-        }
-        .onChange(of: mapCenter?.latitude) { _, _ in
-            guard isBrowseMode, let center = mapCenter else { return }
-            if let last = lastFetchedCenter,
-               CLLocation(latitude: last.latitude, longitude: last.longitude)
-                .distance(from: CLLocation(latitude: center.latitude, longitude: center.longitude))
-                < Self.dynamicPlacesRefetchDistanceMeters {
-                return
-            }
-            fetchDynamicPlaces(around: center)
-        }
-        .onAppear {
-            guard isBrowseMode, dynamicPlaces.isEmpty,
-                  let center = mapCenter ?? searchState.userLocation else { return }
-            fetchDynamicPlaces(around: center)
         }
     }
 
@@ -685,7 +656,7 @@ struct SearchView: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {
-                    let placesToDisplay = dynamicPlaces.isEmpty ? PopularLocation.locations(near: mapCenter ?? searchState.userLocation) : dynamicPlaces
+                    let placesToDisplay = dynamicPlaces
                     ForEach(placesToDisplay) { location in
                         Button {
                             onPlaceExplored?(location)
@@ -907,111 +878,6 @@ struct SearchView: View {
         ])
     }
 
-    // MARK: - MapKit Area / Landmark Search
-
-    /// Queries to find notable areas, districts and landmarks — not individual shops.
-    private static let landmarkQueries: [(query: String, icon: Ph)] = [
-        ("shopping district",  .bag),
-        ("university",         .graduationCap),
-        ("park",               .tree),
-        ("downtown",           .buildings),
-        ("museum",             .ticket),
-        ("stadium",            .speakerHifi),
-        ("hospital",           .firstAid),
-        ("airport",            .airplane),
-        ("mall",               .storefront),
-        ("beach",              .umbrella),
-    ]
-
-    private func fetchDynamicPlaces(around center: CLLocationCoordinate2D) {
-        placesFetchTask?.cancel()
-        placesFetchTask = Task { @MainActor in
-            do {
-                // Apple throttles MKLocalSearch at 50 requests / 60 seconds.
-                // Keep the debounce generous and the parallelism low.
-                try await Task.sleep(for: .milliseconds(1_200))
-                guard !Task.isCancelled, isBrowseMode else { return }
-
-                let region = MKCoordinateRegion(
-                    center: center,
-                    latitudinalMeters: 8000,
-                    longitudinalMeters: 8000
-                )
-
-                var collected: [PopularLocation] = []
-                var seenNames: Set<String> = []
-
-                // Fire a few broad searches in parallel to find notable areas
-                await withTaskGroup(of: [(PopularLocation, Double)].self) { group in
-                    for entry in Self.landmarkQueries.prefix(3) {
-                        group.addTask {
-                            let request = MKLocalSearch.Request()
-                            request.naturalLanguageQuery = entry.query
-                            request.region = region
-                            request.resultTypes = .pointOfInterest
-
-                            guard let response = try? await MKLocalSearch(request: request).start() else {
-                                return []
-                            }
-
-                            let mapCenter = CLLocation(latitude: center.latitude, longitude: center.longitude)
-
-                            return response.mapItems.prefix(3).map { item in
-                                let loc = PopularLocation(
-                                    id: UUID(),
-                                    name: item.name ?? entry.query.capitalized,
-                                    icon: entry.icon,
-                                    coordinate: item.placemark.coordinate,
-                                    busyLevel: .busy,
-                                    subtitle: item.placemark.locality ?? item.placemark.subLocality ?? "Nearby"
-                                )
-                                let dist = CLLocation(
-                                    latitude: item.placemark.coordinate.latitude,
-                                    longitude: item.placemark.coordinate.longitude
-                                ).distance(from: mapCenter)
-                                return (loc, dist)
-                            }
-                        }
-                    }
-
-                    for await results in group {
-                        for (place, _) in results {
-                            let key = place.name.lowercased()
-                            if !seenNames.contains(key) {
-                                seenNames.insert(key)
-                                collected.append(place)
-                            }
-                        }
-                    }
-                }
-
-                guard !Task.isCancelled else { return }
-
-                // Sort by distance from center, take the closest 8
-                let mapCenter = CLLocation(latitude: center.latitude, longitude: center.longitude)
-                let sorted = collected.sorted { a, b in
-                    let da = CLLocation(latitude: a.coordinate.latitude, longitude: a.coordinate.longitude)
-                        .distance(from: mapCenter)
-                    let db = CLLocation(latitude: b.coordinate.latitude, longitude: b.coordinate.longitude)
-                        .distance(from: mapCenter)
-                    return da < db
-                }
-
-                let finalPlaces = Array(sorted.prefix(8))
-
-                if !finalPlaces.isEmpty {
-                    withAnimation(.spring(response: 0.3)) {
-                        self.dynamicPlaces = finalPlaces
-                    }
-                }
-                // Remember where we last fetched so we don't refire while
-                // the user pans within the same area.
-                lastFetchedCenter = center
-            } catch {
-                // Keep showing previous places on error
-            }
-        }
-    }
 }
 
 // MARK: - Preview

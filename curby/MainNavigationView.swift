@@ -61,7 +61,9 @@ struct MainNavigationView: View {
     @State private var heatZoneLoadTask: Task<Void, Never>?
 
     // MARK: - Places Pins (shown when no destination is selected)
-    @State private var placesForMap: [PopularLocation] = []
+    /// Owns the dynamic landmark/area places used by both the bottom-sheet
+    /// carousel and the on-map place pins. No more per-city hardcoded lists.
+    @State private var placesService = DynamicPlacesService()
 
     // MARK: - Explore Mode (browse parking near a Place without setting a destination)
     @State private var exploredPlace: PopularLocation?
@@ -196,11 +198,9 @@ struct MainNavigationView: View {
                 syncSavedParkPinFromDetector()
             }
             syncSavedParkPinFromDetector()
-            // Populate place pins for the map
+            // Populate place pins for the map (dynamic — MKLocalSearch).
             if let coord = locationService.currentLocation?.coordinate {
-                updatePlacesForMap(center: coord)
-            } else {
-                placesForMap = PopularLocation.locations(near: nil)
+                placesService.fetchIfNeeded(near: coord)
             }
         }
         .onChange(of: parkingEventDetector.presenceState) { _, new in
@@ -370,7 +370,7 @@ struct MainNavigationView: View {
 
                 // Popular places pins — visible when browsing (no destination selected)
                 if searchState.selectedDestination == nil, currentMapZoom >= 10.0 {
-                    ForEvery(placesForMap) { place in
+                    ForEvery(placesService.places) { place in
                         MapViewAnnotation(coordinate: place.coordinate) {
                             PlaceMapPin(
                                 place: place,
@@ -494,7 +494,7 @@ struct MainNavigationView: View {
                 if newZoom >= 10.0, centerMovedSignificantly {
                     placesSearchCoordinate = center
                     if searchState.selectedDestination == nil {
-                        updatePlacesForMap(center: center)
+                        placesService.fetchIfNeeded(near: center)
                     }
                 }
 
@@ -707,7 +707,7 @@ struct MainNavigationView: View {
         }
 
         let centerLocation = CLLocation(latitude: center.latitude, longitude: center.longitude)
-        let nearest = placesForMap
+        let nearest = placesService.places
             .map { ($0, CLLocation(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude).distance(from: centerLocation)) }
             .filter { $0.1 < 350 }
             .min(by: { $0.1 < $1.1 })?
@@ -728,10 +728,6 @@ struct MainNavigationView: View {
             guard !Task.isCancelled else { return }
             hoveredPlace = nearest
         }
-    }
-
-    private func updatePlacesForMap(center: CLLocationCoordinate2D) {
-        placesForMap = PopularLocation.locations(near: center)
     }
 
     private func refreshParkingExperienceForCurrentDestination(retryBackend: Bool) {
@@ -883,6 +879,7 @@ struct MainNavigationView: View {
                 parkingSearchManager: parkingWebSocketManager,
                 parkingEventDetector: parkingEventDetector,
                 exploredPlace: exploredPlace,
+                dynamicPlaces: placesService.places,
                 mapCenter: placesSearchCoordinate,
                 showRecenterButton: cameraController.showRecenterButton,
                 onRecenter: { cameraController.recenter() },
