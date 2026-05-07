@@ -22,6 +22,9 @@ struct SearchView: View {
     let parkingEventDetector: ParkingEventDetector
     /// Place the user is browsing (no destination set). Drives the Explore-mode UI.
     var exploredPlace: PopularLocation?
+    /// Dynamic landmark/area places, owned by DynamicPlacesService in the
+    /// parent view and passed in here.
+    var dynamicPlaces: [PopularLocation] = []
     /// Coordinate to use for suggesting local places (updates as map pans)
     var mapCenter: CLLocationCoordinate2D?
     /// Shown when the map is in free-explore mode (user panned away from follow).
@@ -38,10 +41,6 @@ struct SearchView: View {
     var onExpandWalkingRadius: (() -> Void)?
 
     @FocusState private var isSearchFocused: Bool
-
-    /// Dynamic landmark/area places, owned by DynamicPlacesService in the
-    /// parent view and passed in here.
-    var dynamicPlaces: [PopularLocation] = []
 
     var body: some View {
         VStack(spacing: 0) {
