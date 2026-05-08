@@ -2,16 +2,17 @@
 //  DynamicPlacesService.swift
 //  curby
 //
-//  Single source of dynamic landmark/area places. Both the Hotspots
-//  carousel in the bottom sheet and the on-map place pins observe this
-//  service so they stay in sync.
+//  Single source of dynamic Hotspot places. Both the carousel in the bottom
+//  sheet and the on-map place pins observe this service so they stay in sync.
 //
-//  Backed by Mapbox SearchBox forward search (not Apple's MKLocalSearch).
-//  Apple's POI categories don't include "neighborhood" / "district" — every
-//  query for "downtown" came back as POIs (specific malls or buildings)
-//  instead of areas. Mapbox forward exposes feature types
-//  `neighborhood,locality,district,place` that return real administrative
-//  areas alongside well-known POIs.
+//  Backed by OpenStreetMap Overpass. Mapbox SearchBox forward worked but had
+//  weak proximity bias and required a textual query — there's no
+//  "neighborhoods near here" call. Overpass lets us query OSM directly for
+//  features tagged place=neighbourhood / suburb / quarter within a radius,
+//  which matches the user's mental model of a Hotspot exactly (Hell's
+//  Kitchen, Mission District, South Congress — not parks, not specific
+//  POIs). Public Overpass instance is free, no API key required; we keep
+//  request volume polite via the existing debounce + distance throttle.
 //
 
 import CoreLocation
@@ -28,35 +29,14 @@ final class DynamicPlacesService {
     @ObservationIgnored private var fetchTask: Task<Void, Never>?
     @ObservationIgnored private var lastFetchedCenter: CLLocationCoordinate2D?
 
-    /// Keep debounces generous and parallelism low — Mapbox SearchBox has a
-    /// per-second rate limit on the paid plan.
+    /// Public Overpass instances appreciate sparse usage. Combined with the
+    /// distance throttle below, this caps fetches to a few per minute even
+    /// during heavy panning.
     private let debounceMilliseconds: UInt64 = 1_200
     /// Don't refetch while panning inside this radius of the last fetch.
     private let refetchDistanceMeters: Double = 1_500
-
-    /// Generic urban-area queries we run in parallel. The first three execute
-    /// per fetch. Each result is filtered to area-scale feature types below.
-    private static let landmarkQueries: [(query: String, icon: Ph)] = [
-        ("downtown",     .buildings),
-        ("district",     .mapPinArea),
-        ("park",         .tree),
-        ("midtown",      .buildings),
-        ("uptown",       .buildings),
-        ("village",      .storefront),
-        ("plaza",        .storefront),
-    ]
-
-    /// Mapbox feature types we surface as Hotspots — area-scale destinations
-    /// drivers recognize. POIs slip in for famous landmarks (zoos, stadiums,
-    /// airports) and are filtered by name length below as a backstop.
-    /// `nonisolated` so per-query TaskGroup closures can read it.
-    private nonisolated static let allowedFeatureTypes: Set<String> = [
-        "neighborhood",
-        "locality",
-        "district",
-        "place",
-        "poi",
-    ]
+    /// How far around the map center we ask Overpass for neighborhoods.
+    private let searchRadiusMeters: Int = 8_000
 
     /// Schedule a fetch if the center has moved beyond `refetchDistanceMeters`
     /// since the last successful fetch.
@@ -76,130 +56,112 @@ final class DynamicPlacesService {
     }
 
     private func fetch(around center: CLLocationCoordinate2D) async {
-        guard let token = Bundle.main.object(forInfoDictionaryKey: "MBXAccessToken") as? String,
-              !token.isEmpty
-        else { return }
-
         isLoading = true
         defer { isLoading = false }
 
-        let proximity = "\(center.longitude),\(center.latitude)"
+        let overpassQuery = """
+        [out:json][timeout:15];
+        (
+          node["place"~"neighbourhood|suburb|quarter"](around:\(searchRadiusMeters),\(center.latitude),\(center.longitude));
+        );
+        out tags 30;
+        """
 
-        var collected: [PopularLocation] = []
-        var seenIDs = Set<String>()
+        guard let url = URL(string: "https://overpass-api.de/api/interpreter") else { return }
 
-        await withTaskGroup(of: [PopularLocation].self) { group in
-            for entry in Self.landmarkQueries.prefix(3) {
-                group.addTask {
-                    await Self.fetchOne(
-                        query: entry.query,
-                        icon: entry.icon,
-                        proximity: proximity,
-                        token: token
-                    )
-                }
-            }
-
-            for await results in group {
-                for place in results {
-                    if seenIDs.insert(place.id.uuidString).inserted {
-                        collected.append(place)
-                    }
-                }
-            }
-        }
-
-        guard !Task.isCancelled else { return }
-
-        // Sort by distance to the proximity center and keep the top 8.
-        let mapCenter = CLLocation(latitude: center.latitude, longitude: center.longitude)
-        let sorted = collected.sorted {
-            let a = CLLocation(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude)
-            let b = CLLocation(latitude: $1.coordinate.latitude, longitude: $1.coordinate.longitude)
-            return a.distance(from: mapCenter) < b.distance(from: mapCenter)
-        }
-
-        let finalPlaces = Array(sorted.prefix(8))
-        // Only replace if non-empty so users keep seeing the previous list
-        // while the next fetch is in flight.
-        if !finalPlaces.isEmpty {
-            self.places = finalPlaces
-        }
-        self.lastFetchedCenter = center
-    }
-
-    /// Run a single Mapbox forward query. Off-MainActor (the TaskGroup
-    /// closures execute concurrently); does no actor-isolated work.
-    private nonisolated static func fetchOne(
-        query: String,
-        icon: Ph,
-        proximity: String,
-        token: String
-    ) async -> [PopularLocation] {
-        var components = URLComponents(string: "https://api.mapbox.com/search/searchbox/v1/forward")
-        components?.queryItems = [
-            URLQueryItem(name: "q", value: query),
-            URLQueryItem(name: "access_token", value: token),
-            URLQueryItem(name: "language", value: "en"),
-            URLQueryItem(name: "limit", value: "10"),
-            URLQueryItem(name: "types", value: "neighborhood,locality,district,place,poi"),
-            URLQueryItem(name: "proximity", value: proximity),
-        ]
-        guard let url = components?.url else { return [] }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.setValue(CurbyConstants.nominatimUserAgent, forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 18
+        let escaped = overpassQuery.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        request.httpBody = "data=\(escaped)".data(using: .utf8)
 
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return [] }
-            let decoded = try JSONDecoder().decode(MapboxForwardFeatures.self, from: data)
-            return decoded.features.compactMap { feature -> PopularLocation? in
-                guard let coords = feature.geometry?.coordinates, coords.count >= 2 else { return nil }
-                let featureType = feature.properties.featureType ?? ""
-                guard allowedFeatureTypes.contains(featureType) else { return nil }
-                let name = (feature.properties.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                guard name.count >= 3 else { return nil }
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse,
+                  (200 ... 299).contains(http.statusCode)
+            else { return }
+
+            let decoded = try JSONDecoder().decode(OverpassResponse.self, from: data)
+            guard !Task.isCancelled else { return }
+
+            let mapCenter = CLLocation(latitude: center.latitude, longitude: center.longitude)
+
+            let candidates: [PopularLocation] = decoded.elements.compactMap { element in
+                guard let lat = element.lat, let lon = element.lon,
+                      let name = element.tags.name?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      name.count >= 3
+                else { return nil }
                 return PopularLocation(
                     id: UUID(),
                     name: name,
-                    icon: icon,
-                    coordinate: CLLocationCoordinate2D(latitude: coords[1], longitude: coords[0]),
+                    icon: Self.icon(for: element.tags.place),
+                    coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon),
                     // Neutral until real busyness data lands (#5). The chip
-                    // rendering stays in the UI; level will eventually be
-                    // backed by real data.
+                    // rendering stays in the UI; level will be backed by real
+                    // data once we have it.
                     busyLevel: .open,
-                    subtitle: feature.properties.placeFormatted ?? "Nearby"
+                    subtitle: Self.subtitle(for: element.tags.place)
                 )
             }
+
+            // Dedupe by lowercased name (OSM sometimes carries the same
+            // neighborhood as both `quarter` and `neighbourhood`).
+            var seen = Set<String>()
+            let deduped = candidates.filter { seen.insert($0.name.lowercased()).inserted }
+
+            let sorted = deduped.sorted {
+                let a = CLLocation(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude)
+                let b = CLLocation(latitude: $1.coordinate.latitude, longitude: $1.coordinate.longitude)
+                return a.distance(from: mapCenter) < b.distance(from: mapCenter)
+            }
+
+            let finalPlaces = Array(sorted.prefix(8))
+            if !finalPlaces.isEmpty {
+                self.places = finalPlaces
+            }
+            self.lastFetchedCenter = center
         } catch {
-            return []
+            // Public Overpass occasionally returns 429 / timeouts under load —
+            // keep showing the previous list and try again on the next pan.
+        }
+    }
+
+    // MARK: - Display helpers
+
+    private static func icon(for place: String?) -> Ph {
+        switch (place ?? "").lowercased() {
+        case "neighbourhood", "neighborhood": return .mapPinArea
+        case "suburb":                        return .houseLine
+        case "quarter":                       return .buildings
+        default:                              return .mapPinArea
+        }
+    }
+
+    private static func subtitle(for place: String?) -> String {
+        switch (place ?? "").lowercased() {
+        case "neighbourhood", "neighborhood": return "Neighborhood"
+        case "suburb":                        return "Suburb"
+        case "quarter":                       return "District"
+        default:                              return "Hotspot"
         }
     }
 }
 
-// MARK: - Mapbox forward decoder (private to this file)
+// MARK: - Overpass decoder (private to this file)
 
-private struct MapboxForwardFeatures: Decodable {
-    let features: [Feature]
+private struct OverpassResponse: Decodable {
+    let elements: [Element]
 
-    struct Feature: Decodable {
-        let geometry: Geometry?
-        let properties: Properties
+    struct Element: Decodable {
+        let lat: Double?
+        let lon: Double?
+        let tags: Tags
 
-        struct Geometry: Decodable {
-            let coordinates: [Double]
-        }
-
-        struct Properties: Decodable {
+        struct Tags: Decodable {
             let name: String?
-            let placeFormatted: String?
-            let featureType: String?
-            let mapboxID: String?
-
-            private enum CodingKeys: String, CodingKey {
-                case name
-                case placeFormatted = "place_formatted"
-                case featureType = "feature_type"
-                case mapboxID = "mapbox_id"
-            }
+            let place: String?
         }
     }
 }
