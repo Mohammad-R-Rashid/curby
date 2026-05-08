@@ -320,7 +320,7 @@ struct SearchView: View {
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(result.name)
-                                    .font(.system(size: 15, weight: .medium))
+                                    .font(.system(size: 15, weight: .semibold))
                                     .foregroundStyle(.primary)
                                     .multilineTextAlignment(.leading)
 
@@ -612,13 +612,19 @@ struct SearchView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
 
-                    Text("•")
-                        .foregroundStyle(.tertiary)
-                        .font(.system(size: 10))
+                    // Distance is only meaningful when there's a real
+                    // destination to walk to. In Explore mode the parking
+                    // distance was being computed against the Hotspot's
+                    // centroid, which the user never asked about.
+                    if searchState.selectedDestination != nil {
+                        Text("•")
+                            .foregroundStyle(.tertiary)
+                            .font(.system(size: 10))
 
-                    Text(area.distanceText)
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundStyle(pinTint(for: area))
+                        Text(area.distanceText)
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundStyle(pinTint(for: area))
+                    }
                 }
             }
 
@@ -733,7 +739,7 @@ struct SearchView: View {
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(recent.name)
-                                    .font(.system(size: 15, weight: .medium))
+                                    .font(.system(size: 15, weight: .semibold))
                                     .foregroundStyle(.primary)
                                     .lineLimit(1)
 
@@ -753,7 +759,9 @@ struct SearchView: View {
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                 }
             }
             .padding(.vertical, 6)

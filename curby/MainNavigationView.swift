@@ -853,9 +853,9 @@ struct MainNavigationView: View {
                                     .aspectRatio(contentMode: .fit)
                                     .frame(width: 13, height: 13)
                                 Text("Parking")
-                                    .font(.system(size: 15, weight: .medium))
+                                    .font(.system(size: 15, weight: .semibold))
                             }
-                            .foregroundStyle(CurbyGlass.primaryTint)
+                            .foregroundStyle(.primary)
                         }
 
                         Spacer()

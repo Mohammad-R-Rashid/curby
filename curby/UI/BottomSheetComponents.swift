@@ -220,6 +220,10 @@ struct UnifiedRecommendationCard: View {
     let recommendation: CurbyParkingRecommendation
     let isParked: Bool
     let onNavigate: () -> Void
+    /// Kept as optional callbacks for callers, but the card no longer renders
+    /// Retry / Cancel buttons — they were confusing ("retry what?", "cancel
+    /// what?") and clearing the destination via the search-bar X already
+    /// does the right thing.
     let onCancel: (() -> Void)?
     let onRetry: (() -> Void)?
 
@@ -248,50 +252,18 @@ struct UnifiedRecommendationCard: View {
                 customLabel: recommendation.matchQualityShortLabel
             )
 
-            HStack(spacing: 8) {
-                Button {
-                    CurbyHaptics.light()
-                    onNavigate()
-                } label: {
-                    Text("Open Spot")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.primary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 9)
-                        .curbyGlassSurface(tint: CurbyGlass.primaryTint, cornerRadius: CurbyGlass.compactCornerRadius)
-                }
-                .buttonStyle(.plain)
-
-                if let onRetry {
-                    Button {
-                        CurbyHaptics.medium()
-                        onRetry()
-                    } label: {
-                        Text("Retry")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.primary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 9)
-                            .curbyGlassSurface(tint: nil, cornerRadius: CurbyGlass.compactCornerRadius)
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                if let onCancel {
-                    Button {
-                        CurbyHaptics.light()
-                        onCancel()
-                    } label: {
-                        Text("Cancel")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.primary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 9)
-                            .curbyGlassSurface(tint: CurbyGlass.destinationTint, cornerRadius: CurbyGlass.compactCornerRadius)
-                    }
-                    .buttonStyle(.plain)
-                }
+            Button {
+                CurbyHaptics.light()
+                onNavigate()
+            } label: {
+                Text("Navigate")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 11)
+                    .curbyGlassSurface(tint: CurbyGlass.primaryTint, cornerRadius: CurbyGlass.compactCornerRadius)
             }
+            .buttonStyle(.plain)
         }
         .padding(16)
         .curbyGlassSurface(tint: CurbyGlass.primaryTint, cornerRadius: CurbyGlass.cardCornerRadius)
