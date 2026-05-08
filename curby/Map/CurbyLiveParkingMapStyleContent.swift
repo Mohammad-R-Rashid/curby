@@ -14,6 +14,11 @@ struct CurbyLiveParkingMapStyleContent: MapStyleContent {
     let walkingGeofenceRadiusMeters: Double?
     let activeRecommendation: CurbyParkingRecommendation?
     let pendingRecommendation: CurbyParkingRecommendation?
+    /// True only after the user has tapped Navigate. The recommendation route
+    /// line (and any pending alternative) only renders during an actual
+    /// navigation session — otherwise a route line would draw the moment a
+    /// recommendation arrived, making the user think nav had started.
+    var isNavigating: Bool = false
     var developerMode: Bool = false
 
     var body: some MapStyleContent {
@@ -29,7 +34,7 @@ struct CurbyLiveParkingMapStyleContent: MapStyleContent {
             )
         }
 
-        if let activeRecommendation {
+        if isNavigating, let activeRecommendation {
             routeLayers(
                 for: activeRecommendation,
                 sourceID: "curby-live-route-source",
@@ -39,7 +44,7 @@ struct CurbyLiveParkingMapStyleContent: MapStyleContent {
             )
         }
 
-        if let pendingRecommendation {
+        if isNavigating, let pendingRecommendation {
             routeLayers(
                 for: pendingRecommendation,
                 sourceID: "curby-pending-route-source",

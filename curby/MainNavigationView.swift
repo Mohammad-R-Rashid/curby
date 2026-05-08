@@ -31,6 +31,9 @@ struct MainNavigationView: View {
     @State private var parkingWebSocketManager: ParkingWebSocketManager
     @State private var searchState = SearchState()
     @State private var liveActivityController = LiveParkingActivityController()
+    /// True from the moment the user taps Navigate until they clear the
+    /// destination / exit Explore. Drives the on-map route line.
+    @State private var isNavigating: Bool = false
 
     // MARK: - Sheet State
 
@@ -318,6 +321,7 @@ struct MainNavigationView: View {
                     walkingGeofenceRadiusMeters: walkingGeofenceMeters,
                     activeRecommendation: parkingWebSocketManager.activeRecommendation,
                     pendingRecommendation: parkingWebSocketManager.pendingRouteUpdate,
+                    isNavigating: isNavigating,
                     developerMode: developerModeEnabled
                 )
 
@@ -691,6 +695,7 @@ struct MainNavigationView: View {
         parkingAreaManager.clear()
         heatZoneManager.clearZones()
         liveActivityController.end()
+        isNavigating = false
         sheetDetent = .fraction(0.30)
     }
 
@@ -824,6 +829,12 @@ struct MainNavigationView: View {
                             CurbyHaptics.light()
                             withAnimation {
                                 self.selectedParkingArea = nil
+                                // Camera back to whatever the user was looking
+                                // at before tapping the parking — recommendation
+                                // (destination mode), destination address, or
+                                // the explored place (Explore mode). Without
+                                // the Explore branch the camera was getting
+                                // stuck at the parking after Back.
                                 if let recommendation = parkingWebSocketManager.activeRecommendation {
                                     cameraController.navigateToDestination(
                                         recommendation.area.coordinate,
@@ -831,6 +842,8 @@ struct MainNavigationView: View {
                                     )
                                 } else if let dest = searchState.selectedDestination {
                                     cameraController.navigateToDestination(dest.coordinate)
+                                } else if let place = exploredPlace {
+                                    cameraController.navigateToDestination(place.coordinate)
                                 }
                             }
                         } label: {
@@ -909,6 +922,7 @@ struct MainNavigationView: View {
                     parkingAreaManager.clear()
                     heatZoneManager.clearZones()
                     liveActivityController.end()
+                    isNavigating = false
                     customPinCoordinate = nil
                     selectedParkingArea = nil
                     cameraController.recenter()
@@ -999,6 +1013,12 @@ struct MainNavigationView: View {
 
     private func openInMaps(coordinate: CLLocationCoordinate2D, name: String) {
         CurbyHaptics.light()
+
+        // Mark that an active navigation session has begun. The on-map route
+        // line is gated on this — it should not draw simply because a
+        // recommendation arrived; only after the user has explicitly tapped
+        // Navigate.
+        isNavigating = true
 
         // Start (or restart) the Live Activity / Dynamic Island session for
         // the trip before handing off to Apple Maps. Curby will be backgrounded

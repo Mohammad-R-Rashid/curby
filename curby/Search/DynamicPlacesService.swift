@@ -5,14 +5,14 @@
 //  Single source of dynamic Hotspot places. Both the carousel in the bottom
 //  sheet and the on-map place pins observe this service so they stay in sync.
 //
-//  Backed by OpenStreetMap Overpass. Mapbox SearchBox forward worked but had
-//  weak proximity bias and required a textual query — there's no
-//  "neighborhoods near here" call. Overpass lets us query OSM directly for
-//  features tagged place=neighbourhood / suburb / quarter within a radius,
-//  which matches the user's mental model of a Hotspot exactly (Hell's
-//  Kitchen, Mission District, South Congress — not parks, not specific
-//  POIs). Public Overpass instance is free, no API key required; we keep
-//  request volume polite via the existing debounce + distance throttle.
+//  Backed by OpenStreetMap Overpass. Mapbox SearchBox forward couldn't be
+//  asked "neighborhoods near here" without a textual query and its proximity
+//  bias was too weak; Overpass speaks OSM directly so we can ask for
+//  area-scale tags (suburb/quarter/town) plus major destination tags
+//  (university, mall, stadium, museum, attraction, airport) within a
+//  geographic radius. That mix matches "Hotspot" — Westfield Valley Fair,
+//  Santa Clara University, SAP Center, Hell's Kitchen — without flooding the
+//  list with small community parks or specific buildings.
 //
 
 import CoreLocation
@@ -30,13 +30,12 @@ final class DynamicPlacesService {
     @ObservationIgnored private var lastFetchedCenter: CLLocationCoordinate2D?
 
     /// Public Overpass instances appreciate sparse usage. Combined with the
-    /// distance throttle below, this caps fetches to a few per minute even
-    /// during heavy panning.
+    /// distance throttle below, this caps fetches to a few per minute.
     private let debounceMilliseconds: UInt64 = 1_200
     /// Don't refetch while panning inside this radius of the last fetch.
     private let refetchDistanceMeters: Double = 1_500
-    /// How far around the map center we ask Overpass for neighborhoods.
-    private let searchRadiusMeters: Int = 8_000
+    /// Radius around the map center we ask Overpass for.
+    private let searchRadiusMeters: Int = 9_000
 
     /// Schedule a fetch if the center has moved beyond `refetchDistanceMeters`
     /// since the last successful fetch.
@@ -59,14 +58,29 @@ final class DynamicPlacesService {
         isLoading = true
         defer { isLoading = false }
 
-        // `out tags center` keeps the lat/lon (the bare `out tags` returns
-        // tag-only elements with no geometry, which the decoder then drops).
+        // Combined Overpass query — area-scale neighborhoods + major
+        // destinations. `way` queries are needed because malls / universities
+        // / stadiums are usually polygon features, not point nodes; Overpass
+        // computes their `center` for us via `out tags center`.
+        // Excludes `place=neighbourhood` (too small in suburbs — was the
+        // source of the unrecognizable-community-names complaint).
+        let r = searchRadiusMeters
+        let lat = center.latitude
+        let lon = center.longitude
         let overpassQuery = """
-        [out:json][timeout:15];
+        [out:json][timeout:18];
         (
-          node["place"~"neighbourhood|suburb|quarter"](around:\(searchRadiusMeters),\(center.latitude),\(center.longitude));
+          node["place"~"^(suburb|quarter|town)$"](around:\(r),\(lat),\(lon));
+          way["amenity"~"^(university|college)$"](around:\(r),\(lat),\(lon));
+          node["amenity"~"^(university|college)$"](around:\(r),\(lat),\(lon));
+          way["shop"="mall"](around:\(r),\(lat),\(lon));
+          node["shop"="mall"](around:\(r),\(lat),\(lon));
+          way["leisure"="stadium"](around:\(r),\(lat),\(lon));
+          way["tourism"~"^(attraction|theme_park|zoo|museum|aquarium)$"](around:\(r),\(lat),\(lon));
+          node["tourism"~"^(attraction|theme_park|zoo|museum|aquarium)$"](around:\(r),\(lat),\(lon));
+          way["aeroway"="aerodrome"](around:\(r),\(lat),\(lon));
         );
-        out tags center 30;
+        out tags center 40;
         """
 
         guard let url = URL(string: "https://overpass-api.de/api/interpreter") else { return }
@@ -75,7 +89,7 @@ final class DynamicPlacesService {
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.setValue(CurbyConstants.nominatimUserAgent, forHTTPHeaderField: "User-Agent")
-        request.timeoutInterval = 18
+        request.timeoutInterval = 22
         let escaped = overpassQuery.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         request.httpBody = "data=\(escaped)".data(using: .utf8)
 
@@ -88,28 +102,31 @@ final class DynamicPlacesService {
             let decoded = try JSONDecoder().decode(OverpassResponse.self, from: data)
             guard !Task.isCancelled else { return }
 
-            let mapCenter = CLLocation(latitude: center.latitude, longitude: center.longitude)
+            let mapCenter = CLLocation(latitude: lat, longitude: lon)
 
             let candidates: [PopularLocation] = decoded.elements.compactMap { element in
-                guard let lat = element.lat, let lon = element.lon,
+                // Nodes carry lat/lon directly; ways/relations carry it as
+                // `center` thanks to the `out tags center` modifier.
+                let elementLat = element.lat ?? element.center?.lat
+                let elementLon = element.lon ?? element.center?.lon
+                guard let elementLat,
+                      let elementLon,
                       let name = element.tags.name?.trimmingCharacters(in: .whitespacesAndNewlines),
                       name.count >= 3
                 else { return nil }
                 return PopularLocation(
                     id: UUID(),
                     name: name,
-                    icon: Self.icon(for: element.tags.place),
-                    coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon),
-                    // Neutral until real busyness data lands (#5). The chip
-                    // rendering stays in the UI; level will be backed by real
-                    // data once we have it.
+                    icon: Self.icon(for: element.tags),
+                    coordinate: CLLocationCoordinate2D(latitude: elementLat, longitude: elementLon),
+                    // Neutral until real busyness data lands (#5).
                     busyLevel: .open,
-                    subtitle: Self.subtitle(for: element.tags.place)
+                    subtitle: Self.subtitle(for: element.tags)
                 )
             }
 
-            // Dedupe by lowercased name (OSM sometimes carries the same
-            // neighborhood as both `quarter` and `neighbourhood`).
+            // Dedupe by lowercased name (OSM occasionally carries the same
+            // place as both `place` and a landmark tag).
             var seen = Set<String>()
             let deduped = candidates.filter { seen.insert($0.name.lowercased()).inserted }
 
@@ -119,34 +136,51 @@ final class DynamicPlacesService {
                 return a.distance(from: mapCenter) < b.distance(from: mapCenter)
             }
 
-            let finalPlaces = Array(sorted.prefix(8))
+            let finalPlaces = Array(sorted.prefix(10))
             if !finalPlaces.isEmpty {
                 self.places = finalPlaces
             }
             self.lastFetchedCenter = center
         } catch {
-            // Public Overpass occasionally returns 429 / timeouts under load —
-            // keep showing the previous list and try again on the next pan.
+            // Overpass occasionally returns 429 / timeouts under load — keep
+            // showing the previous list and try again on the next pan.
         }
     }
 
     // MARK: - Display helpers
 
-    private static func icon(for place: String?) -> Ph {
-        switch (place ?? "").lowercased() {
-        case "neighbourhood", "neighborhood": return .mapPinArea
-        case "suburb":                        return .houseLine
-        case "quarter":                       return .buildings
-        default:                              return .mapPinArea
+    private static func icon(for tags: OverpassResponse.Element.Tags) -> Ph {
+        if tags.amenity == "university" || tags.amenity == "college" { return .graduationCap }
+        if tags.shop == "mall" { return .storefront }
+        if tags.leisure == "stadium" { return .speakerHifi }
+        if tags.tourism == "museum" { return .ticket }
+        if tags.tourism == "zoo" || tags.tourism == "aquarium" { return .pawPrint }
+        if tags.tourism == "theme_park" { return .gameController }
+        if tags.tourism == "attraction" { return .star }
+        if tags.aeroway == "aerodrome" { return .airplane }
+        switch (tags.place ?? "").lowercased() {
+        case "town":              return .buildings
+        case "suburb", "quarter": return .mapPinArea
+        default:                  return .mapPinArea
         }
     }
 
-    private static func subtitle(for place: String?) -> String {
-        switch (place ?? "").lowercased() {
-        case "neighbourhood", "neighborhood": return "Neighborhood"
-        case "suburb":                        return "Suburb"
-        case "quarter":                       return "District"
-        default:                              return "Hotspot"
+    private static func subtitle(for tags: OverpassResponse.Element.Tags) -> String {
+        if tags.amenity == "university" { return "University" }
+        if tags.amenity == "college" { return "College" }
+        if tags.shop == "mall" { return "Mall" }
+        if tags.leisure == "stadium" { return "Stadium" }
+        if tags.tourism == "museum" { return "Museum" }
+        if tags.tourism == "zoo" { return "Zoo" }
+        if tags.tourism == "aquarium" { return "Aquarium" }
+        if tags.tourism == "theme_park" { return "Theme Park" }
+        if tags.tourism == "attraction" { return "Attraction" }
+        if tags.aeroway == "aerodrome" { return "Airport" }
+        switch (tags.place ?? "").lowercased() {
+        case "town":         return "Town"
+        case "suburb":       return "District"
+        case "quarter":      return "Quarter"
+        default:             return "Hotspot"
         }
     }
 }
@@ -159,11 +193,22 @@ private struct OverpassResponse: Decodable {
     struct Element: Decodable {
         let lat: Double?
         let lon: Double?
+        let center: Center?
         let tags: Tags
+
+        struct Center: Decodable {
+            let lat: Double
+            let lon: Double
+        }
 
         struct Tags: Decodable {
             let name: String?
             let place: String?
+            let amenity: String?
+            let shop: String?
+            let leisure: String?
+            let tourism: String?
+            let aeroway: String?
         }
     }
 }
