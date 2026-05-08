@@ -823,52 +823,47 @@ struct MainNavigationView: View {
     private var sheetContent: some View {
         if let selectedParkingArea {
             VStack(spacing: 0) {
-                GlassEffectContainer(spacing: CurbyGlass.chromeSpacing) {
-                    HStack {
-                        Button {
-                            CurbyHaptics.light()
-                            withAnimation {
-                                self.selectedParkingArea = nil
-                                // Camera back to whatever the user was looking
-                                // at before tapping the parking — recommendation
-                                // (destination mode), destination address, or
-                                // the explored place (Explore mode). Without
-                                // the Explore branch the camera was getting
-                                // stuck at the parking after Back.
-                                if let recommendation = parkingWebSocketManager.activeRecommendation {
-                                    cameraController.navigateToDestination(
-                                        recommendation.area.coordinate,
-                                        zoom: 16.0
-                                    )
-                                } else if let dest = searchState.selectedDestination {
-                                    cameraController.navigateToDestination(dest.coordinate)
-                                } else if let place = exploredPlace {
-                                    cameraController.navigateToDestination(place.coordinate)
-                                }
+                // ── Parking-detail nav header — deliberately NOT styled like
+                // the search bar (no liquid-glass pill). Plain top bar with a
+                // back chevron and the parking name, so it reads as a separate
+                // pane instead of "the search bar morphed into something".
+                HStack(spacing: 12) {
+                    Button {
+                        CurbyHaptics.light()
+                        withAnimation {
+                            self.selectedParkingArea = nil
+                            if let recommendation = parkingWebSocketManager.activeRecommendation {
+                                cameraController.navigateToDestination(
+                                    recommendation.area.coordinate,
+                                    zoom: 16.0
+                                )
+                            } else if let dest = searchState.selectedDestination {
+                                cameraController.navigateToDestination(dest.coordinate)
+                            } else if let place = exploredPlace {
+                                cameraController.navigateToDestination(place.coordinate)
                             }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Ph.caretLeft.bold
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .frame(width: 13, height: 13)
-                                Text("Parking")
-                                    .font(.system(size: 15, weight: .semibold))
-                            }
-                            .foregroundStyle(.primary)
                         }
-
-                        Spacer()
-
-                        sheetRecenterButton
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(.primary)
+                            .frame(width: 36, height: 36)
+                            .background(Circle().fill(Color(.systemGray5)))
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .curbyGlassSurface(cornerRadius: CurbyGlass.barCornerRadius)
+                    .buttonStyle(.plain)
+
+                    Text(selectedParkingArea.displayName)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    sheetRecenterButton
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 20)
-                .padding(.bottom, 8)
+                .padding(.horizontal, 16)
+                .padding(.top, 18)
+                .padding(.bottom, 6)
 
                 ParkingAreaDetailView(
                     area: selectedParkingArea,

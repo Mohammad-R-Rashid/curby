@@ -175,11 +175,10 @@ struct SearchView: View {
     private var searchBar: some View {
         GlassEffectContainer(spacing: CurbyGlass.chromeSpacing) {
             HStack(spacing: 12) {
-                Ph.magnifyingGlass.regular
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .foregroundStyle(CurbyGlass.primaryTint)
-                    .frame(width: 17, height: 17)
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, height: 22)
 
                 if let dest = searchState.selectedDestination, !searchState.isSearchActive {
                     // Destination mode — name + subtitle in the bar (no duplicate header card)
@@ -256,9 +255,9 @@ struct SearchView: View {
                     }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .curbyGlassSurface(cornerRadius: CurbyGlass.barCornerRadius)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .curbyGlassSurface(cornerRadius: 28)
         }
     }
 
@@ -622,8 +621,8 @@ struct SearchView: View {
                             .font(.system(size: 10))
 
                         Text(area.distanceText)
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
-                            .foregroundStyle(pinTint(for: area))
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.primary)
                     }
                 }
             }
@@ -668,6 +667,7 @@ struct SearchView: View {
                         } label: {
                             placeCircle(location: location)
                         }
+                        .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -676,13 +676,13 @@ struct SearchView: View {
     }
 
     private func placeCircle(location: PopularLocation) -> some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 8) {
             location.icon.regular
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .foregroundStyle(HeatZoneGeometry.color(for: location.busyLevel))
-                .frame(width: 30, height: 30)
-                .frame(width: 68, height: 68)
+                .frame(width: 38, height: 38)
+                .frame(width: 78, height: 78)
                 .glassEffect(
                     .regular.tint(HeatZoneGeometry.color(for: location.busyLevel).opacity(0.18)),
                     in: .circle
@@ -693,11 +693,11 @@ struct SearchView: View {
                 }
 
             Text(location.name)
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
-                .frame(width: 80)
+                .frame(width: 88)
 
             Circle()
                 .fill(HeatZoneGeometry.color(for: location.busyLevel))
@@ -799,18 +799,12 @@ struct SearchView: View {
             icon.bold
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .foregroundStyle(CurbyGlass.primaryTint)
+                .foregroundStyle(.primary)
                 .frame(width: 15, height: 15)
 
             Text(title)
                 .font(.system(size: 20, weight: .bold))
                 .foregroundStyle(.primary)
-
-            Ph.caretRight.bold
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .foregroundStyle(.secondary)
-                .frame(width: 12, height: 12)
 
             Spacer()
         }
