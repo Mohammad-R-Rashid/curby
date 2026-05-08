@@ -59,12 +59,14 @@ final class DynamicPlacesService {
         isLoading = true
         defer { isLoading = false }
 
+        // `out tags center` keeps the lat/lon (the bare `out tags` returns
+        // tag-only elements with no geometry, which the decoder then drops).
         let overpassQuery = """
         [out:json][timeout:15];
         (
           node["place"~"neighbourhood|suburb|quarter"](around:\(searchRadiusMeters),\(center.latitude),\(center.longitude));
         );
-        out tags 30;
+        out tags center 30;
         """
 
         guard let url = URL(string: "https://overpass-api.de/api/interpreter") else { return }
