@@ -8,7 +8,6 @@
 import CoreLocation
 import MapboxMaps
 import MapKit
-import PhosphorSwift
 import SwiftUI
 import UIKit
 
@@ -786,11 +785,9 @@ struct MainNavigationView: View {
             CurbyHaptics.light()
             showSettings = true
         } label: {
-            Ph.gearSix.fill
-                .resizable()
-                .aspectRatio(contentMode: .fit)
+            Image(systemName: "gearshape.fill")
+                .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(.primary)
-                .frame(width: 18, height: 18)
                 .frame(width: 36, height: 36)
         }
         .glassEffect(.regular, in: .circle)
@@ -1096,25 +1093,6 @@ struct MainNavigationView: View {
         default:
             break
         }
-    }
-
-    private func sheetBarIconButton(
-        icon: Ph,
-        tint: Color,
-        accessibilityLabel: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            icon.bold
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .foregroundStyle(tint)
-                .frame(width: 18, height: 18)
-                .frame(width: 32, height: 32)
-                .contentShape(.circle)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(accessibilityLabel)
     }
 
     /// True when Mapbox’s routable point is meaningfully offset from the POI centroid (debug routing).
@@ -1532,11 +1510,9 @@ private struct DestinationMapPin: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
-                Ph.mapPin.fill
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
+                Image(systemName: "mappin")
+                    .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(.white)
-                    .frame(width: 11, height: 11)
                     .frame(width: 22, height: 22)
                     .background(CurbyGlass.destinationTint, in: Circle())
 
@@ -1580,11 +1556,9 @@ private struct RecommendationMapPin: View {
 
             VStack(spacing: 0) {
                 HStack(spacing: 6) {
-                    Ph.park.fill
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
+                    Image(systemName: "p.circle.fill")
+                        .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(.white)
-                        .frame(width: 11, height: 11)
                         .frame(width: 22, height: 22)
                         .background(pinTint, in: Circle())
 
@@ -1649,11 +1623,9 @@ private struct LiveParkingAreaMapPin: View {
             // Full labeled balloon
             VStack(spacing: 0) {
                 HStack(spacing: 6) {
-                    icon.fill
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
+                    Image(systemName: sfSymbol)
+                        .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.white)
-                        .frame(width: 11, height: 11)
                         .frame(width: 22, height: 22)
                         .background(tint, in: Circle())
 
@@ -1698,25 +1670,19 @@ private struct LiveParkingAreaMapPin: View {
                     }
                     .shadow(color: .black.opacity(0.18), radius: 4, y: 2)
 
-                icon.fill
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
+                Image(systemName: sfSymbol)
+                    .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(tint)
-                    .frame(width: 13, height: 13)
             }
         }
     }
 
-    private var icon: Ph {
+    private var sfSymbol: String {
         switch area.kind {
-        case .garage:
-            return .garage
-        case .lot:
-            return .park
-        case .street:
-            return .roadHorizon
-        case .general:
-            return .mapPinArea
+        case .garage:  return "building.2.fill"
+        case .lot:     return "square.dashed"
+        case .street:  return "road.lanes"
+        case .general: return "p.circle.fill"
         }
     }
 
@@ -1858,11 +1824,9 @@ private struct HoverPlacePopup: View {
                         .lineLimit(1)
                 }
 
-                Ph.caretRight.bold
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.tertiary)
-                    .frame(width: 11, height: 11)
                     .padding(.leading, 2)
             }
             .padding(.horizontal, 14)
