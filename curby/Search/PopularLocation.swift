@@ -3,20 +3,19 @@
 //  curby
 //
 //  Model for a popular/busy location near the user. Instances are produced
-//  dynamically by DynamicPlacesService (MKLocalSearch around the current map
-//  center) — the hardcoded per-city arrays that used to live here have been
-//  removed.
+//  dynamically by DynamicPlacesService.
 //
 
 import CoreLocation
 import Foundation
-import PhosphorSwift
 
 /// A well-known location where parking is competitive.
 struct PopularLocation: Identifiable, Hashable {
     let id: UUID
     let name: String
-    let icon: Ph
+    /// SF Symbol name (e.g. "graduationcap", "bag.fill"). Apple iconography
+    /// throughout — Phosphor is no longer used for surfaced places.
+    let sfSymbol: String
     let coordinate: CLLocationCoordinate2D
     let busyLevel: BusyLevel
     let subtitle: String

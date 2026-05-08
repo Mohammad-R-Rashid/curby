@@ -18,7 +18,6 @@
 import CoreLocation
 import Foundation
 import Observation
-import PhosphorSwift
 
 @MainActor
 @Observable
@@ -117,7 +116,7 @@ final class DynamicPlacesService {
                 return PopularLocation(
                     id: UUID(),
                     name: name,
-                    icon: Self.icon(for: element.tags),
+                    sfSymbol: Self.sfSymbol(for: element.tags),
                     coordinate: CLLocationCoordinate2D(latitude: elementLat, longitude: elementLon),
                     // Neutral until real busyness data lands (#5).
                     busyLevel: .open,
@@ -149,19 +148,23 @@ final class DynamicPlacesService {
 
     // MARK: - Display helpers
 
-    private static func icon(for tags: OverpassResponse.Element.Tags) -> Ph {
-        if tags.amenity == "university" || tags.amenity == "college" { return .graduationCap }
-        if tags.shop == "mall" { return .storefront }
-        if tags.leisure == "stadium" { return .speakerHifi }
-        if tags.tourism == "museum" { return .ticket }
-        if tags.tourism == "zoo" || tags.tourism == "aquarium" { return .pawPrint }
-        if tags.tourism == "theme_park" { return .gameController }
-        if tags.tourism == "attraction" { return .star }
-        if tags.aeroway == "aerodrome" { return .airplane }
+    /// Maps OSM tags to an SF Symbol name. Apple iconography throughout —
+    /// Phosphor was previously used here but inconsistent with the rest of
+    /// the app's iOS 26 styling.
+    private static func sfSymbol(for tags: OverpassResponse.Element.Tags) -> String {
+        if tags.amenity == "university" || tags.amenity == "college" { return "graduationcap.fill" }
+        if tags.shop == "mall" { return "bag.fill" }
+        if tags.leisure == "stadium" { return "sportscourt.fill" }
+        if tags.tourism == "museum" { return "building.columns.fill" }
+        if tags.tourism == "zoo" { return "tortoise.fill" }
+        if tags.tourism == "aquarium" { return "fish.fill" }
+        if tags.tourism == "theme_park" { return "ferris.wheel" }
+        if tags.tourism == "attraction" { return "star.fill" }
+        if tags.aeroway == "aerodrome" { return "airplane" }
         switch (tags.place ?? "").lowercased() {
-        case "town":              return .buildings
-        case "suburb", "quarter": return .mapPinArea
-        default:                  return .mapPinArea
+        case "town":              return "building.2.fill"
+        case "suburb", "quarter": return "mappin.and.ellipse"
+        default:                  return "mappin"
         }
     }
 

@@ -6,7 +6,6 @@
 //
 
 import MapKit
-import PhosphorSwift
 import SwiftUI
 
 /// Sheet content that fully adapts based on app state.
@@ -204,7 +203,7 @@ struct SearchView: View {
                         }
 
                         barAccessoryButton(
-                            icon: .x,
+                            systemImage: "xmark.circle.fill",
                             tint: .secondary,
                             accessibilityLabel: "Clear destination"
                         ) {
@@ -214,7 +213,7 @@ struct SearchView: View {
                     }
                 } else {
                     // Search mode — text field
-                    TextField("Where to?", text: $searchState.searchText)
+                    TextField("Search Maps", text: $searchState.searchText)
                         .font(.system(size: 17))
                         .focused($isSearchFocused)
                         .submitLabel(.search)
@@ -228,7 +227,7 @@ struct SearchView: View {
 
                     if !searchState.searchText.isEmpty {
                         barAccessoryButton(
-                            icon: .x,
+                            systemImage: "xmark.circle.fill",
                             tint: .secondary,
                             accessibilityLabel: "Clear search"
                         ) {
@@ -240,8 +239,8 @@ struct SearchView: View {
 
                     if showRecenterButton {
                         barAccessoryButton(
-                            icon: .crosshairSimple,
-                            tint: CurbyGlass.primaryTint,
+                            systemImage: "location.north.fill",
+                            tint: .primary,
                             accessibilityLabel: "Recenter map on your location"
                         ) {
                             onRecenter?()
@@ -257,7 +256,8 @@ struct SearchView: View {
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 14)
-            .curbyGlassSurface(cornerRadius: 28)
+            .glassEffect(.regular.interactive(), in: Capsule())
+            .overlay(Capsule().strokeBorder(CurbyGlass.outline, lineWidth: 0.75))
         }
     }
 
@@ -307,14 +307,12 @@ struct SearchView: View {
                         HStack(spacing: 12) {
                             ZStack {
                                 Circle()
-                                    .fill(CurbyGlass.primaryTint.opacity(0.16))
+                                    .fill(Color(.systemGray5))
                                     .frame(width: 36, height: 36)
 
-                                Ph.mapPin.fill
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .foregroundStyle(CurbyGlass.primaryTint)
-                                    .frame(width: 15, height: 15)
+                                Image(systemName: "mappin")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(.secondary)
                             }
 
                             VStack(alignment: .leading, spacing: 2) {
@@ -332,11 +330,9 @@ struct SearchView: View {
 
                             Spacer(minLength: 8)
 
-                            Ph.caretRight.bold
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(.tertiary)
-                                .frame(width: 11, height: 11)
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
@@ -365,11 +361,9 @@ struct SearchView: View {
 
     private func exploringHeader(for place: PopularLocation) -> some View {
         HStack(spacing: 12) {
-            place.icon.fill
-                .resizable()
-                .aspectRatio(contentMode: .fit)
+            Image(systemName: place.sfSymbol)
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 14, height: 14)
                 .frame(width: 30, height: 30)
                 .background(HeatZoneGeometry.color(for: place.busyLevel), in: Circle())
 
@@ -390,13 +384,11 @@ struct SearchView: View {
                 CurbyHaptics.light()
                 onExitExplore?()
             } label: {
-                Ph.x.bold
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 12, height: 12)
                     .frame(width: 28, height: 28)
-                    .background(.thinMaterial, in: Circle())
+                    .glassEffect(.regular.interactive(), in: .circle)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Exit place browsing")
@@ -439,13 +431,13 @@ struct SearchView: View {
 
     private var nearbyParkingSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(title: "Parking Zones", icon: .mapPinArea)
+            sectionHeader(title: "Parking Zones", systemImage: "p.circle.fill")
             geofenceSummaryCard
 
             if !parkingAreaManager.streetAreas.isEmpty {
                 parkingAreaGroup(
                     title: "Street Parking",
-                    icon: .roadHorizon,
+                    systemImage: "road.lanes",
                     areas: parkingAreaManager.streetAreas
                 )
             }
@@ -453,7 +445,7 @@ struct SearchView: View {
             if !parkingAreaManager.structureAreas.isEmpty {
                 parkingAreaGroup(
                     title: "Garages & Lots",
-                    icon: .garage,
+                    systemImage: "building.2.fill",
                     areas: parkingAreaManager.structureAreas
                 )
             }
@@ -461,11 +453,10 @@ struct SearchView: View {
     }
 
     private var geofenceSummaryCard: some View {
-        HStack {
-            Ph.circleDashed.fill
-                .resizable()
-                .frame(width: 16, height: 16)
-                .foregroundStyle(CurbyGlass.primaryTint)
+        HStack(spacing: 6) {
+            Image(systemName: "scope")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
             Text("\(parkingAreaManager.areas.count) options inside \(parkingAreaManager.geofenceDistanceText)")
                 .font(.system(size: 14))
                 .foregroundStyle(.secondary)
@@ -475,16 +466,14 @@ struct SearchView: View {
 
     private func parkingAreaGroup(
         title: String,
-        icon: Ph,
+        systemImage: String,
         areas: [LiveParkingArea]
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
-                icon.bold
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .foregroundStyle(pinTint(for: areas.first ?? parkingAreaManager.areas.first ?? fallbackArea))
-                    .frame(width: 14, height: 14)
+                Image(systemName: systemImage)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.primary)
 
                 Text(title)
                     .font(.system(size: 15, weight: .semibold))
@@ -508,7 +497,7 @@ struct SearchView: View {
 
     private var liveParkingSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(title: "Live Parking", icon: .navigationArrow)
+            sectionHeader(title: "Live Parking", systemImage: "location.north.fill")
 
             if parkingSearchManager.isSearching {
                 MinimalStatusCard(
@@ -586,11 +575,9 @@ struct SearchView: View {
                     .fill(pinTint(for: area).opacity(0.18))
                     .frame(width: 38, height: 38)
 
-                pinIcon(for: area).fill
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
+                Image(systemName: pinSFSymbol(for: area))
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(pinTint(for: area))
-                    .frame(width: 18, height: 18)
             }
 
             VStack(alignment: .leading, spacing: 4) {
@@ -639,11 +626,9 @@ struct SearchView: View {
                         .fill(pinTint(for: area))
                 )
 
-            Ph.caretRight.bold
-                .resizable()
-                .aspectRatio(contentMode: .fit)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.tertiary)
-                .frame(width: 11, height: 11)
         }
         .padding(14)
         .curbyGlassSurface(
@@ -656,7 +641,7 @@ struct SearchView: View {
 
     private var placesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(title: "Hotspots", icon: .mapPinArea)
+            sectionHeader(title: "Hotspots", systemImage: "sparkles")
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {
@@ -677,11 +662,9 @@ struct SearchView: View {
 
     private func placeCircle(location: PopularLocation) -> some View {
         VStack(spacing: 8) {
-            location.icon.regular
-                .resizable()
-                .aspectRatio(contentMode: .fit)
+            Image(systemName: location.sfSymbol)
+                .font(.system(size: 26, weight: .semibold))
                 .foregroundStyle(HeatZoneGeometry.color(for: location.busyLevel))
-                .frame(width: 38, height: 38)
                 .frame(width: 78, height: 78)
                 .glassEffect(
                     .regular.tint(HeatZoneGeometry.color(for: location.busyLevel).opacity(0.18)),
@@ -709,7 +692,7 @@ struct SearchView: View {
 
     private var recentsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(title: "Recents", icon: .clockCounterClockwise)
+            sectionHeader(title: "Recents", systemImage: "clock.fill")
 
             VStack(spacing: 2) {
                 ForEach(searchState.recentDestinations) { recent in
@@ -730,11 +713,9 @@ struct SearchView: View {
                                     .fill(Color(.systemGray5))
                                     .frame(width: 32, height: 32)
 
-                                Ph.clockCounterClockwise.regular
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fit)
+                                Image(systemName: "clock")
+                                    .font(.system(size: 13, weight: .semibold))
                                     .foregroundStyle(.secondary)
-                                    .frame(width: 14, height: 14)
                             }
 
                             VStack(alignment: .leading, spacing: 2) {
@@ -751,11 +732,9 @@ struct SearchView: View {
 
                             Spacer()
 
-                            Ph.dotsThree.bold
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(.tertiary)
-                                .frame(width: 16, height: 16)
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
@@ -773,7 +752,7 @@ struct SearchView: View {
     // MARK: - Helpers
 
     private func barAccessoryButton(
-        icon: Ph,
+        systemImage: String,
         tint: Color,
         accessibilityLabel: String,
         action: @escaping () -> Void
@@ -782,11 +761,9 @@ struct SearchView: View {
             CurbyHaptics.selection()
             action()
         } label: {
-            icon.bold
-                .resizable()
-                .aspectRatio(contentMode: .fit)
+            Image(systemName: systemImage)
+                .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(tint)
-                .frame(width: 17, height: 17)
                 .frame(width: 32, height: 32)
                 .contentShape(.circle)
         }
@@ -794,13 +771,11 @@ struct SearchView: View {
         .accessibilityLabel(accessibilityLabel)
     }
 
-    private func sectionHeader(title: String, icon: Ph) -> some View {
-        HStack(spacing: 6) {
-            icon.bold
-                .resizable()
-                .aspectRatio(contentMode: .fit)
+    private func sectionHeader(title: String, systemImage: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(.primary)
-                .frame(width: 15, height: 15)
 
             Text(title)
                 .font(.system(size: 20, weight: .bold))
@@ -811,16 +786,12 @@ struct SearchView: View {
         .padding(.horizontal, 16)
     }
 
-    private func pinIcon(for area: LiveParkingArea) -> Ph {
+    private func pinSFSymbol(for area: LiveParkingArea) -> String {
         switch area.kind {
-        case .garage:
-            return .garage
-        case .lot:
-            return .park
-        case .street:
-            return .roadHorizon
-        case .general:
-            return .mapPinArea
+        case .garage:  return "building.2.fill"
+        case .lot:     return "square.dashed"
+        case .street:  return "road.lanes"
+        case .general: return "p.circle.fill"
         }
     }
 

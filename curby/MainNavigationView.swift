@@ -848,7 +848,7 @@ struct MainNavigationView: View {
                             .font(.system(size: 16, weight: .bold))
                             .foregroundStyle(.primary)
                             .frame(width: 36, height: 36)
-                            .background(Circle().fill(Color(.systemGray5)))
+                            .glassEffect(.regular.interactive(), in: .circle)
                     }
                     .buttonStyle(.plain)
 
@@ -1778,11 +1778,9 @@ private struct PlaceMapPin: View {
         if showLabel {
             VStack(spacing: 0) {
                 HStack(spacing: 6) {
-                    place.icon.fill
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
+                    Image(systemName: place.sfSymbol)
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.white)
-                        .frame(width: 13, height: 13)
                         .frame(width: 24, height: 24)
                         .background(tint, in: Circle())
 
@@ -1820,11 +1818,9 @@ private struct PlaceMapPin: View {
                     }
                     .shadow(color: .black.opacity(0.18), radius: 4, y: 2)
 
-                place.icon.fill
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
+                Image(systemName: place.sfSymbol)
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(tint)
-                    .frame(width: 14, height: 14)
             }
         }
     }
@@ -1845,11 +1841,9 @@ private struct HoverPlacePopup: View {
             onTap(place)
         } label: {
             HStack(spacing: 10) {
-                place.icon.fill
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
+                Image(systemName: place.sfSymbol)
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 14, height: 14)
                     .frame(width: 28, height: 28)
                     .background(tint, in: Circle())
 
