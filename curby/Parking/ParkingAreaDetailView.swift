@@ -5,7 +5,6 @@
 //  Detail sheet for a real parking area pin.
 //
 
-import PhosphorSwift
 import SwiftUI
 
 struct ParkingAreaDetailView: View {
@@ -84,7 +83,7 @@ struct ParkingAreaDetailView: View {
             if !area.fullAddress.isEmpty {
                 MinimalStatusCard(
                     title: "Address",
-                    icon: .mapPin,
+                    systemImage: "mappin",
                     tint: .primary,
                     detail: area.fullAddress
                 )
@@ -92,7 +91,7 @@ struct ParkingAreaDetailView: View {
             if let phone = area.phone, !phone.isEmpty {
                 MinimalStatusCard(
                     title: "Phone",
-                    icon: .phone,
+                    systemImage: "phone.fill",
                     tint: .primary,
                     detail: phone
                 )
@@ -100,7 +99,7 @@ struct ParkingAreaDetailView: View {
             if let website = area.website, !website.isEmpty {
                 MinimalStatusCard(
                     title: "Website",
-                    icon: .globe,
+                    systemImage: "globe",
                     tint: .primary,
                     detail: website
                 )
@@ -112,7 +111,7 @@ struct ParkingAreaDetailView: View {
         VStack(spacing: 8) {
             MinimalStatusCard(
                 title: "Hours",
-                icon: .clock,
+                systemImage: "clock",
                 tint: .primary,
                 detail: area.openHoursText.joined(separator: "\n")
             )

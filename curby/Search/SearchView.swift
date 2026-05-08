@@ -81,7 +81,7 @@ struct SearchView: View {
                         } else if let error = parkingAreaManager.lastErrorMessage {
                             MinimalStatusCard(
                                 title: "Nearby parking unavailable",
-                                icon: .warningCircle,
+                                systemImage: "exclamationmark.triangle.fill",
                                 tint: CurbyGlass.destinationTint,
                                 detail: error
                             )
@@ -99,7 +99,7 @@ struct SearchView: View {
                         } else if let error = parkingAreaManager.lastErrorMessage {
                             MinimalStatusCard(
                                 title: "Nearby parking unavailable",
-                                icon: .warningCircle,
+                                systemImage: "exclamationmark.triangle.fill",
                                 tint: CurbyGlass.destinationTint,
                                 detail: error
                             )
@@ -406,7 +406,7 @@ struct SearchView: View {
         return VStack(alignment: .leading, spacing: 12) {
             MinimalStatusCard(
                 title: "No nearby parking",
-                icon: .warningCircle,
+                systemImage: "exclamationmark.triangle.fill",
                 tint: CurbyGlass.destinationTint,
                 actionTitle: canExpand ? "Expand search" : nil,
                 action: canExpand ? { onExpandWalkingRadius?() } : nil
@@ -502,7 +502,7 @@ struct SearchView: View {
             if parkingSearchManager.isSearching {
                 MinimalStatusCard(
                     title: "Searching...",
-                    icon: .spinnerGap,
+                    systemImage: "arrow.triangle.2.circlepath",
                     tint: CurbyGlass.primaryTint
                 )
             }
@@ -510,7 +510,7 @@ struct SearchView: View {
             if case .noData(_) = parkingSearchManager.status {
                 MinimalStatusCard(
                     title: "No route available",
-                    icon: .warningCircle,
+                    systemImage: "exclamationmark.triangle.fill",
                     tint: CurbyGlass.warningTint
                 )
             }
@@ -518,18 +518,18 @@ struct SearchView: View {
             if case .error(_) = parkingSearchManager.status {
                 MinimalStatusCard(
                     title: "Connection issue",
-                    icon: .wifiX,
+                    systemImage: "wifi.exclamationmark",
                     tint: CurbyGlass.destinationTint,
                     actionTitle: "Retry"
                 ) {
                     Task { await parkingSearchManager.retryCurrentSearch() }
                 }
             }
-            
+
             if case .arrived = parkingSearchManager.status {
                 MinimalStatusCard(
                     title: "Arrived",
-                    icon: .checkCircle,
+                    systemImage: "checkmark.circle.fill",
                     tint: CurbyGlass.successTint
                 )
             }
@@ -557,7 +557,7 @@ struct SearchView: View {
                 VStack(spacing: 8) {
                     MinimalStatusCard(
                         title: "Better parking found",
-                        icon: .sparkle,
+                        systemImage: "sparkles",
                         tint: CurbyGlass.warningTint,
                         actionTitle: "Switch"
                     ) {

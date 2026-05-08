@@ -6,7 +6,6 @@
 //
 
 import MapKit
-import PhosphorSwift
 import SwiftUI
 import UIKit
 
@@ -14,7 +13,7 @@ import UIKit
 
 struct MinimalStatusCard: View {
     let title: String
-    let icon: Ph
+    let systemImage: String
     let tint: Color
     var detail: String? = nil
     var actionTitle: String? = nil
@@ -28,11 +27,9 @@ struct MinimalStatusCard: View {
                         .fill(tint.opacity(0.18))
                         .frame(width: 36, height: 36)
 
-                    icon.fill
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
+                    Image(systemName: systemImage)
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(tint)
-                        .frame(width: 16, height: 16)
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -85,7 +82,7 @@ struct CompactMetricRow: View {
         HStack(spacing: 12) {
             if let walkMinutes {
                 metricCell(
-                    icon: .personSimpleWalk,
+                    systemImage: "figure.walk",
                     value: "\(walkMinutes)m",
                     label: "Walk",
                     tint: CurbyGlass.successTint
@@ -94,7 +91,7 @@ struct CompactMetricRow: View {
 
             if let driveMinutes {
                 metricCell(
-                    icon: .carProfile,
+                    systemImage: "car.fill",
                     value: "\(driveMinutes)m",
                     label: "Drive",
                     tint: CurbyGlass.primaryTint
@@ -103,7 +100,7 @@ struct CompactMetricRow: View {
 
             if let trafficScore {
                 metricCell(
-                    icon: .trafficCone,
+                    systemImage: "cone.fill",
                     value: "\(Int(((1 - trafficScore) * 100).rounded()))%",
                     label: "Traffic",
                     tint: CurbyGlass.destinationTint
@@ -112,7 +109,7 @@ struct CompactMetricRow: View {
 
             if let customLabel {
                 metricCell(
-                    icon: .info,
+                    systemImage: "info.circle.fill",
                     value: customLabel,
                     label: "Match",
                     tint: CurbyGlass.warningTint
@@ -121,14 +118,12 @@ struct CompactMetricRow: View {
         }
     }
 
-    private func metricCell(icon: Ph, value: String, label: String, tint: Color) -> some View {
+    private func metricCell(systemImage: String, value: String, label: String, tint: Color) -> some View {
         VStack(spacing: 4) {
             HStack(spacing: 4) {
-                icon.fill
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
+                Image(systemName: systemImage)
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(tint)
-                    .frame(width: 12, height: 12)
 
                 Text(value)
                     .font(.system(size: 14, weight: .bold, design: .rounded))
@@ -170,10 +165,8 @@ struct MinimalActionButtonRow: View {
                     }
                 } label: {
                     HStack(spacing: 6) {
-                        Ph.park.fill
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(width: 16, height: 16)
+                        Image(systemName: "car.fill")
+                            .font(.system(size: 14, weight: .semibold))
                         Text(isParked ? "Parked" : "Park here")
                             .font(.system(size: 15, weight: .semibold))
                     }
@@ -194,10 +187,8 @@ struct MinimalActionButtonRow: View {
                 onNavigate()
             } label: {
                 HStack(spacing: 6) {
-                    Ph.navigationArrow.fill
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 16, height: 16)
+                    Image(systemName: "location.north.fill")
+                        .font(.system(size: 14, weight: .semibold))
                     Text("Navigate")
                         .font(.system(size: 15, weight: .semibold))
                 }
