@@ -26,9 +26,6 @@ struct SearchView: View {
     var dynamicPlaces: [PopularLocation] = []
     /// Coordinate to use for suggesting local places (updates as map pans)
     var mapCenter: CLLocationCoordinate2D?
-    /// Shown when the map is in free-explore mode (user panned away from follow).
-    var showRecenterButton: Bool = false
-    var onRecenter: (() -> Void)?
     var onMarkAsParked: (() -> Void)?
     var parkSaveState: ParkSaveState = .idle
     let onDestinationSelected: (SelectedDestination) -> Void
@@ -223,16 +220,6 @@ struct SearchView: View {
                     }
                 }
 
-                if showRecenterButton {
-                    barAccessoryButton(
-                        systemImage: "location.north.fill",
-                        tint: .primary,
-                        accessibilityLabel: "Recenter map on your location"
-                    ) {
-                        onRecenter?()
-                    }
-                }
-
                 if searchState.isSearching {
                     ProgressView()
                         .tint(CurbyGlass.primaryTint)
@@ -249,10 +236,9 @@ struct SearchView: View {
     // MARK: - Destination Header Card (Apple Maps style)
     //
     // Floating glass card that takes the place of the search bar once a
-    // destination has been picked. Big title + subtitle, recenter pill on
-    // the right when the user has panned away from their location, and a
-    // close button that clears the destination and brings the search bar
-    // back.
+    // destination has been picked. Big title + subtitle and a clean X.
+    // Recenter has moved out to the top-right map overlay; sitting next
+    // to X here looked like a paired button group.
     private func destinationHeaderCard(dest: SelectedDestination) -> some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
@@ -273,36 +259,19 @@ struct SearchView: View {
 
             Spacer(minLength: 8)
 
-            VStack(spacing: 8) {
-                Button {
-                    CurbyHaptics.selection()
-                    searchState.clearDestination()
-                    onClearDestination()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                        .background(Circle().fill(Color(.systemGray5)))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Clear destination")
-
-                if showRecenterButton {
-                    Button {
-                        CurbyHaptics.light()
-                        onRecenter?()
-                    } label: {
-                        Image(systemName: "location.north.fill")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(CurbyGlass.primaryTint)
-                            .frame(width: 28, height: 28)
-                            .background(Circle().fill(CurbyGlass.primaryTint.opacity(0.15)))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Recenter map on your location")
-                }
+            Button {
+                CurbyHaptics.selection()
+                searchState.clearDestination()
+                onClearDestination()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(.rect)
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Clear destination")
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 16)
@@ -899,8 +868,6 @@ struct SearchView: View {
         parkingAreaManager: ParkingAreaManager(),
         parkingSearchManager: parkingSearchManager,
         parkingEventDetector: parkingEventDetector,
-        showRecenterButton: true,
-        onRecenter: {},
         onMarkAsParked: {},
         onDestinationSelected: { _ in },
         onParkingAreaSelected: { _ in },

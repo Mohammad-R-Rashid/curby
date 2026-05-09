@@ -769,9 +769,19 @@ struct MainNavigationView: View {
 
     private var overlayControls: some View {
         VStack {
-            HStack {
+            HStack(alignment: .top) {
                 Spacer()
-                settingsButton
+                VStack(spacing: 10) {
+                    settingsButton
+                    if cameraController.showRecenterButton {
+                        recenterMapButton
+                            .transition(.scale.combined(with: .opacity))
+                    }
+                }
+                .animation(
+                    .easeInOut(duration: CurbyConstants.uiFadeAnimationDuration),
+                    value: cameraController.showRecenterButton
+                )
             }
             .padding(.horizontal, CurbyConstants.overlayPadding)
             .padding(.top, 8)
@@ -786,19 +796,43 @@ struct MainNavigationView: View {
         }
     }
 
-    // MARK: - Settings Button (Liquid Glass)
+    // MARK: - Map Overlay Buttons (Liquid Glass)
 
+    /// Outlined gearshape — lighter / more iOS-native than the filled
+    /// variant, which read as too heavy sitting on top of the map.
     private var settingsButton: some View {
-        Button {
+        glassCircleButton(systemImage: "gearshape", size: 17) {
             CurbyHaptics.light()
             showSettings = true
-        } label: {
-            Image(systemName: "gearshape.fill")
-                .font(.system(size: 17, weight: .semibold))
+        }
+        .accessibilityLabel("Settings")
+    }
+
+    /// Apple-Maps-style "snap back to me" button. Floats with the settings
+    /// icon at the top-right whenever the camera has drifted off the user's
+    /// puck. Replaces the in-sheet / search-bar inline recenter chrome that
+    /// used to live on the destination card.
+    private var recenterMapButton: some View {
+        glassCircleButton(systemImage: "location.fill", size: 16) {
+            CurbyHaptics.light()
+            cameraController.recenter()
+        }
+        .accessibilityLabel("Recenter map on your location")
+    }
+
+    @ViewBuilder
+    private func glassCircleButton(
+        systemImage: String,
+        size: CGFloat,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: size, weight: .semibold))
                 .foregroundStyle(.primary)
                 .frame(width: 36, height: 36)
         }
-        .glassEffect(.regular, in: .circle)
+        .glassEffect(.regular.interactive(), in: .circle)
         .overlay {
             Circle()
                 .strokeBorder(CurbyGlass.outline, lineWidth: 0.75)
@@ -904,8 +938,6 @@ struct MainNavigationView: View {
                 exploredPlace: exploredPlace,
                 dynamicPlaces: placesService.places,
                 mapCenter: placesSearchCoordinate,
-                showRecenterButton: cameraController.showRecenterButton,
-                onRecenter: { cameraController.recenter() },
                 onMarkAsParked: {
                     Task { await saveParkPinFromDestinationSheet() }
                 },
