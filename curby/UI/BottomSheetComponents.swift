@@ -143,64 +143,152 @@ struct CompactMetricRow: View {
     }
 }
 
+// MARK: - Park Save State
+
+/// Drives the visible state of "Park here" — the button used to fire-and-forget
+/// the explicit-park request, leaving the user with no idea whether the network
+/// call had landed or not.
+enum ParkSaveState: Equatable {
+    case idle
+    case saving
+    case succeeded
+    case failed(String)
+}
+
 // MARK: - Minimal Action Button Row
 
 struct MinimalActionButtonRow: View {
-    let onNavigate: () -> Void
+    /// When nil, the Navigate button is hidden. Used in destination mode where
+    /// `UnifiedRecommendationCard` already renders Navigate-to-parking — a top
+    /// row Navigate-to-destination on top of that just looked like the same
+    /// button twice.
+    let onNavigate: (() -> Void)?
     let onMarkAsParked: (() -> Void)?
-    /// Kept for source compatibility but no longer used to disable / relabel
-    /// the button. The global `parkingEventDetector.presenceState` flips to
-    /// `.parked` whenever the phone sits still long enough — at the user's
-    /// home, at a desk, anywhere — which made "Park here" appear disabled
-    /// for trips where the user clearly hadn't actually parked yet. The
-    /// orange "Your Car" pin on the map already conveys saved-park state;
-    /// this button is for explicit user intent and stays tappable.
-    let isParked: Bool
+    var parkSaveState: ParkSaveState = .idle
+    /// Optional explicit retry. Falls back to `onMarkAsParked` if nil.
+    var onRetryPark: (() -> Void)? = nil
 
     var body: some View {
-        HStack(spacing: 12) {
-            if let onMarkAsParked {
+        VStack(spacing: 10) {
+            HStack(spacing: 12) {
+                if let onMarkAsParked {
+                    parkHereButton(action: onMarkAsParked)
+                }
+                if let onNavigate {
+                    navigateButton(action: onNavigate)
+                }
+            }
+
+            if case let .failed(message) = parkSaveState {
+                parkErrorCard(message: message)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .animation(.easeInOut(duration: 0.18), value: parkSaveState)
+    }
+
+    @ViewBuilder
+    private func parkHereButton(action: @escaping () -> Void) -> some View {
+        let isSaving = parkSaveState == .saving
+        let didSucceed = parkSaveState == .succeeded
+        let isDisabled = isSaving || didSucceed
+
+        Button {
+            CurbyHaptics.medium()
+            action()
+        } label: {
+            HStack(spacing: 6) {
+                if isSaving {
+                    ProgressView()
+                        .tint(.white)
+                        .scaleEffect(0.85)
+                } else {
+                    Image(systemName: didSucceed ? "checkmark.circle.fill" : "car.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+                Text(parkButtonLabel)
+                    .font(.system(size: 15, weight: .semibold))
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .frame(height: 48)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(CurbyGlass.successTint.opacity(isDisabled ? 0.7 : 1.0))
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+    }
+
+    private var parkButtonLabel: String {
+        switch parkSaveState {
+        case .idle, .failed: return "Park here"
+        case .saving: return "Saving…"
+        case .succeeded: return "Parked"
+        }
+    }
+
+    @ViewBuilder
+    private func navigateButton(action: @escaping () -> Void) -> some View {
+        Button {
+            CurbyHaptics.light()
+            action()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "location.north.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                Text("Navigate")
+                    .font(.system(size: 15, weight: .semibold))
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .frame(height: 48)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(CurbyGlass.primaryTint)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func parkErrorCard(message: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(CurbyGlass.destinationTint)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Couldn't save your spot")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text(message)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 6)
+
+            if let retry = onRetryPark ?? onMarkAsParked {
                 Button {
                     CurbyHaptics.medium()
-                    onMarkAsParked()
+                    retry()
                 } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "car.fill")
-                            .font(.system(size: 14, weight: .semibold))
-                        Text("Park here")
-                            .font(.system(size: 15, weight: .semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 48)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(CurbyGlass.successTint)
-                    )
+                    Text("Retry")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(CurbyGlass.destinationTint)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(CurbyGlass.destinationTint.opacity(0.12)))
+                        .overlay(Capsule().strokeBorder(CurbyGlass.destinationTint.opacity(0.24), lineWidth: 0.75))
                 }
                 .buttonStyle(.plain)
             }
-
-            Button {
-                CurbyHaptics.light()
-                onNavigate()
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "location.north.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                    Text("Navigate")
-                        .font(.system(size: 15, weight: .semibold))
-                }
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .frame(height: 48)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(CurbyGlass.primaryTint)
-                )
-            }
-            .buttonStyle(.plain)
         }
+        .padding(12)
+        .curbyGlassSurface(tint: CurbyGlass.destinationTint, cornerRadius: CurbyGlass.compactCornerRadius)
     }
 }
 

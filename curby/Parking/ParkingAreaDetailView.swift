@@ -13,6 +13,7 @@ struct ParkingAreaDetailView: View {
     let isParkedHere: Bool
     let onNavigate: () -> Void
     let onMarkAsParked: () -> Void
+    var parkSaveState: ParkSaveState = .idle
 
     var body: some View {
         ScrollView {
@@ -45,7 +46,7 @@ struct ParkingAreaDetailView: View {
                 MinimalActionButtonRow(
                     onNavigate: onNavigate,
                     onMarkAsParked: onMarkAsParked,
-                    isParked: isParkedHere
+                    parkSaveState: parkSaveState
                 )
 
                 // Recommendation or Walk info

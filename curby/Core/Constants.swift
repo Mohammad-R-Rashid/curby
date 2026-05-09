@@ -69,7 +69,7 @@ enum CurbyConstants {
     // MARK: - Onboarding
 
     /// Default walking circumference in miles.
-    static let walkingCircumferenceDefault: Double = 0.25
+    static let walkingCircumferenceDefault: Double = 0.4
     static let walkingCircumferenceMin: Double = 0.1
     static let walkingCircumferenceMax: Double = 1.0
     static let walkingCircumferenceStep: Double = 0.05

@@ -30,6 +30,7 @@ struct SearchView: View {
     var showRecenterButton: Bool = false
     var onRecenter: (() -> Void)?
     var onMarkAsParked: (() -> Void)?
+    var parkSaveState: ParkSaveState = .idle
     let onDestinationSelected: (SelectedDestination) -> Void
     let onParkingAreaSelected: (LiveParkingArea) -> Void
     /// Tapping a Place card / pin enters Explore mode instead of routing.
@@ -59,13 +60,19 @@ struct SearchView: View {
                     if searchState.isSearchActive && !searchState.searchText.isEmpty {
                         activeSearchContent
                     } else if let dest = searchState.selectedDestination {
-                        // DESTINATION MODE — destination summary lives in the search bar
+                        // DESTINATION MODE — destination summary lives in the search bar.
+                        //
+                        // Navigate-to-destination is dropped from this row when an active
+                        // parking recommendation exists, because UnifiedRecommendationCard
+                        // below already renders Navigate-to-parking — two identical-looking
+                        // "Navigate" buttons going to different places was confusing.
+                        let hasActiveRec = parkingSearchManager.activeRecommendation != nil
                         MinimalActionButtonRow(
-                            onNavigate: {
+                            onNavigate: hasActiveRec ? nil : {
                                 openInMaps(coordinate: dest.coordinate, name: dest.name)
                             },
-                            onMarkAsParked: parkingSearchManager.activeRecommendation != nil ? { onMarkAsParked?() } : nil,
-                            isParked: parkingEventDetector.presenceState == .parked
+                            onMarkAsParked: hasActiveRec ? { onMarkAsParked?() } : nil,
+                            parkSaveState: parkSaveState
                         )
                         .padding(.horizontal, 16)
                         .padding(.bottom, 10)

@@ -8,8 +8,11 @@
 import CoreLocation
 import MapboxMaps
 import MapKit
+import os
 import SwiftUI
 import UIKit
+
+private let parkSaveLogger = Logger(subsystem: "com.curby.app", category: "ParkSave")
 
 /// Root container post-onboarding.
 ///
@@ -40,6 +43,11 @@ struct MainNavigationView: View {
     @State private var selectedParkingArea: LiveParkingArea?
     /// User-confirmed park (Supabase `active_parks`); tap the map pin to confirm removal.
     @State private var savedParkPin: SavedParkPinState?
+    /// Drives the visible state of the "Park here" action so taps stop being
+    /// silent: spinner while the POST is in flight, ✓ Parked on success, an
+    /// inline error card with Retry on failure.
+    @State private var parkSaveState: ParkSaveState = .idle
+    @State private var parkSaveResetTask: Task<Void, Never>?
     @State private var showRemoveParkedConfirm = false
     @State private var walkingGeofenceMeters = OnboardingState.storedWalkingDistanceMeters
     @State private var geofenceRefreshTask: Task<Void, Never>?
@@ -829,6 +837,12 @@ struct MainNavigationView: View {
                         CurbyHaptics.light()
                         withAnimation {
                             self.selectedParkingArea = nil
+                            // Don't carry a pending failure state onto the next
+                            // sheet — if a save just failed in this detail
+                            // view, its error card would otherwise re-render
+                            // attached to a different action.
+                            parkSaveResetTask?.cancel()
+                            if case .failed = parkSaveState { parkSaveState = .idle }
                             if let recommendation = parkingWebSocketManager.activeRecommendation {
                                 cameraController.navigateToDestination(
                                     recommendation.area.coordinate,
@@ -876,7 +890,8 @@ struct MainNavigationView: View {
                     },
                     onMarkAsParked: {
                         Task { await saveParkPin(for: selectedParkingArea) }
-                    }
+                    },
+                    parkSaveState: parkSaveState
                 )
             }
         } else {
@@ -894,6 +909,7 @@ struct MainNavigationView: View {
                 onMarkAsParked: {
                     Task { await saveParkPinFromDestinationSheet() }
                 },
+                parkSaveState: parkSaveState,
                 onDestinationSelected: { dest in
                     handleDestinationSelected(dest)
                 },
@@ -917,6 +933,8 @@ struct MainNavigationView: View {
                     isNavigating = false
                     customPinCoordinate = nil
                     selectedParkingArea = nil
+                    parkSaveResetTask?.cancel()
+                    parkSaveState = .idle
                     cameraController.recenter()
                     sheetDetent = .fraction(0.30)
                 },
@@ -969,6 +987,9 @@ struct MainNavigationView: View {
     }
 
     private func applySavedPark(coordinate: CLLocationCoordinate2D, title: String) async {
+        parkSaveResetTask?.cancel()
+        parkSaveState = .saving
+
         do {
             try await parkingEventDetector.recordExplicitPark(at: coordinate, displayTitle: title)
             savedParkPin = SavedParkPinState(coordinate: coordinate, title: title)
@@ -984,8 +1005,23 @@ struct MainNavigationView: View {
                     await parkingWebSocketManager.markArrived()
                 }
             }
+
+            parkSaveState = .succeeded
+            // Collapse the sheet so the orange "Your Car" pin on the map is
+            // actually visible — otherwise the only visible result of a
+            // successful save was hidden behind a half-open sheet.
+            withAnimation(.spring(response: 0.35)) {
+                sheetDetent = .fraction(0.30)
+            }
+            parkSaveResetTask = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(1_500))
+                guard !Task.isCancelled else { return }
+                parkSaveState = .idle
+            }
         } catch {
+            parkSaveLogger.error("Park save failed: \(error.localizedDescription, privacy: .public)")
             CurbyHaptics.notify(.error)
+            parkSaveState = .failed(error.localizedDescription)
         }
     }
 
