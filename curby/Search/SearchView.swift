@@ -44,11 +44,24 @@ struct SearchView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // MARK: - Search Bar (always visible)
-            searchBar
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 12)
+            // MARK: - Header (Search bar OR Apple-Maps-style destination card)
+            //
+            // Previously the destination collapsed *into* the search bar pill,
+            // which made the whole screen feel like one giant pill that
+            // morphed shapes — visually busy and didn't match Apple Maps'
+            // pattern (a real title card, not a search field with the title
+            // shoved inside it).
+            if let dest = searchState.selectedDestination, !searchState.isSearchActive {
+                destinationHeaderCard(dest: dest)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+                    .padding(.bottom, 12)
+            } else {
+                searchBar
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+                    .padding(.bottom, 12)
+            }
 
             Divider()
                 .opacity(0.3)
@@ -186,79 +199,44 @@ struct SearchView: View {
                     .foregroundStyle(.secondary)
                     .frame(width: 22, height: 22)
 
-                if let dest = searchState.selectedDestination, !searchState.isSearchActive {
-                    // Destination mode — name + subtitle in the bar (no duplicate header card)
-                    HStack(alignment: .center, spacing: 10) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(dest.name)
-                                .font(.system(size: 17, weight: .medium))
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-
-                            if !dest.subtitle.isEmpty {
-                                Text(dest.subtitle)
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                        }
-
-                        Spacer(minLength: 8)
-
-                        if showRecenterInDestinationBar {
-                            destinationRecenterButton
-                        }
-
-                        barAccessoryButton(
-                            systemImage: "xmark.circle.fill",
-                            tint: .secondary,
-                            accessibilityLabel: "Clear destination"
-                        ) {
-                            searchState.clearDestination()
-                            onClearDestination()
-                        }
+                TextField("Search Maps", text: $searchState.searchText)
+                    .font(.system(size: 17))
+                    .focused($isSearchFocused)
+                    .submitLabel(.search)
+                    .onSubmit {
+                        searchState.onSearchTextChanged()
                     }
-                } else {
-                    // Search mode — text field
-                    TextField("Search Maps", text: $searchState.searchText)
-                        .font(.system(size: 17))
-                        .focused($isSearchFocused)
-                        .submitLabel(.search)
-                        .onSubmit {
-                            searchState.onSearchTextChanged()
-                        }
-                        .onChange(of: searchState.searchText) { _, _ in
-                            searchState.isSearchActive = true
-                            searchState.onSearchTextChanged()
-                        }
-
-                    if !searchState.searchText.isEmpty {
-                        barAccessoryButton(
-                            systemImage: "xmark.circle.fill",
-                            tint: .secondary,
-                            accessibilityLabel: "Clear search"
-                        ) {
-                            searchState.searchText = ""
-                            searchState.isSearchActive = false
-                            isSearchFocused = false
-                        }
+                    .onChange(of: searchState.searchText) { _, _ in
+                        searchState.isSearchActive = true
+                        searchState.onSearchTextChanged()
                     }
 
-                    if showRecenterButton {
-                        barAccessoryButton(
-                            systemImage: "location.north.fill",
-                            tint: .primary,
-                            accessibilityLabel: "Recenter map on your location"
-                        ) {
-                            onRecenter?()
-                        }
+                if !searchState.searchText.isEmpty {
+                    barAccessoryButton(
+                        systemImage: "xmark.circle.fill",
+                        tint: .secondary,
+                        accessibilityLabel: "Clear search"
+                    ) {
+                        searchState.searchText = ""
+                        searchState.isSearchActive = false
+                        isSearchFocused = false
                     }
+                }
 
-                    if searchState.isSearching {
-                        ProgressView()
-                            .tint(CurbyGlass.primaryTint)
-                            .scaleEffect(0.8)
+                if showRecenterButton {
+                    barAccessoryButton(
+                        systemImage: "location.north.fill",
+                        tint: .primary,
+                        accessibilityLabel: "Recenter map on your location"
+                    ) {
+                        onRecenter?()
                     }
+                }
+
+                if searchState.isSearching {
+                    ProgressView()
+                        .tint(CurbyGlass.primaryTint)
+                        .scaleEffect(0.8)
                 }
             }
             .padding(.horizontal, 18)
@@ -268,24 +246,67 @@ struct SearchView: View {
         }
     }
 
-    /// After a destination is pinned in the sheet, always offer “snap back to me” with a standard location icon.
-    private var showRecenterInDestinationBar: Bool {
-        showRecenterButton || (searchState.selectedDestination != nil && !searchState.isSearchActive)
-    }
+    // MARK: - Destination Header Card (Apple Maps style)
+    //
+    // Floating glass card that takes the place of the search bar once a
+    // destination has been picked. Big title + subtitle, recenter pill on
+    // the right when the user has panned away from their location, and a
+    // close button that clears the destination and brings the search bar
+    // back.
+    private func destinationHeaderCard(dest: SelectedDestination) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(dest.name)
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
 
-    private var destinationRecenterButton: some View {
-        Button {
-            CurbyHaptics.light()
-            onRecenter?()
-        } label: {
-            Image(systemName: "location.circle.fill")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(CurbyGlass.primaryTint)
-                .frame(width: 32, height: 32)
-                .contentShape(.circle)
+                if !dest.subtitle.isEmpty {
+                    Text(dest.subtitle)
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            VStack(spacing: 8) {
+                Button {
+                    CurbyHaptics.selection()
+                    searchState.clearDestination()
+                    onClearDestination()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(Color(.systemGray5)))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear destination")
+
+                if showRecenterButton {
+                    Button {
+                        CurbyHaptics.light()
+                        onRecenter?()
+                    } label: {
+                        Image(systemName: "location.north.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(CurbyGlass.primaryTint)
+                            .frame(width: 28, height: 28)
+                            .background(Circle().fill(CurbyGlass.primaryTint.opacity(0.15)))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Recenter map on your location")
+                }
+            }
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Recenter map on your location")
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+        .curbyGlassSurface(cornerRadius: CurbyGlass.cardCornerRadius)
     }
 
     // MARK: - Search Results

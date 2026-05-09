@@ -309,12 +309,14 @@ struct UnifiedRecommendationCard: View {
         Int((recommendation.score.score * 100).rounded())
     }
 
+    /// Smooth green→yellow/orange→red ramp. The previous version had a blue
+    /// band in the middle which read as "good" rather than "mediocre".
     private var matchTint: Color {
         switch matchPercent {
-        case 75...:    return CurbyGlass.successTint
-        case 55..<75:  return CurbyGlass.primaryTint
-        case 40..<55:  return CurbyGlass.warningTint
-        default:       return CurbyGlass.destinationTint
+        case 75...:   return CurbyGlass.successTint        // green
+        case 55..<75: return Color(red: 0.78, green: 0.78, blue: 0.30)  // yellow-green
+        case 40..<55: return CurbyGlass.warningTint        // orange
+        default:      return CurbyGlass.destinationTint    // red
         }
     }
 
@@ -369,7 +371,7 @@ struct UnifiedRecommendationCard: View {
             .buttonStyle(.plain)
         }
         .padding(16)
-        .curbyGlassSurface(tint: CurbyGlass.primaryTint, cornerRadius: CurbyGlass.cardCornerRadius)
+        .curbyGlassSurface(cornerRadius: CurbyGlass.cardCornerRadius)
         .padding(.horizontal, 16)
     }
 }
