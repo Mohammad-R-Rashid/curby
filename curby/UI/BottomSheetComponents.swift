@@ -76,14 +76,18 @@ struct CompactMetricRow: View {
     let walkMinutes: Int?
     let driveMinutes: Int?
     let trafficScore: Double?
+    /// Kept for source compat — no longer rendered here. The Match score
+    /// lives prominently in UnifiedRecommendationCard's header now, instead
+    /// of being crammed into a fourth cell with a label that always
+    /// truncated.
     var customLabel: String? = nil
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             if let walkMinutes {
                 metricCell(
                     systemImage: "figure.walk",
-                    value: "\(walkMinutes)m",
+                    value: "\(walkMinutes) min",
                     label: "Walk",
                     tint: CurbyGlass.successTint
                 )
@@ -92,7 +96,7 @@ struct CompactMetricRow: View {
             if let driveMinutes {
                 metricCell(
                     systemImage: "car.fill",
-                    value: "\(driveMinutes)m",
+                    value: "\(driveMinutes) min",
                     label: "Drive",
                     tint: CurbyGlass.primaryTint
                 )
@@ -104,15 +108,6 @@ struct CompactMetricRow: View {
                     value: "\(Int(((1 - trafficScore) * 100).rounded()))%",
                     label: "Traffic",
                     tint: CurbyGlass.destinationTint
-                )
-            }
-
-            if let customLabel {
-                metricCell(
-                    systemImage: "info.circle.fill",
-                    value: customLabel,
-                    label: "Match",
-                    tint: CurbyGlass.warningTint
                 )
             }
         }
@@ -153,33 +148,37 @@ struct CompactMetricRow: View {
 struct MinimalActionButtonRow: View {
     let onNavigate: () -> Void
     let onMarkAsParked: (() -> Void)?
+    /// Kept for source compatibility but no longer used to disable / relabel
+    /// the button. The global `parkingEventDetector.presenceState` flips to
+    /// `.parked` whenever the phone sits still long enough — at the user's
+    /// home, at a desk, anywhere — which made "Park here" appear disabled
+    /// for trips where the user clearly hadn't actually parked yet. The
+    /// orange "Your Car" pin on the map already conveys saved-park state;
+    /// this button is for explicit user intent and stays tappable.
     let isParked: Bool
 
     var body: some View {
         HStack(spacing: 12) {
             if let onMarkAsParked {
                 Button {
-                    if !isParked {
-                        CurbyHaptics.medium()
-                        onMarkAsParked()
-                    }
+                    CurbyHaptics.medium()
+                    onMarkAsParked()
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: "car.fill")
                             .font(.system(size: 14, weight: .semibold))
-                        Text(isParked ? "Parked" : "Park here")
+                        Text("Park here")
                             .font(.system(size: 15, weight: .semibold))
                     }
-                    .foregroundStyle(isParked ? Color.black.opacity(0.85) : .white)
+                    .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .frame(height: 48)
                     .background(
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(isParked ? CurbyGlass.warningTint : CurbyGlass.successTint)
+                            .fill(CurbyGlass.successTint)
                     )
                 }
                 .buttonStyle(.plain)
-                .disabled(isParked)
             }
 
             Button {
@@ -218,29 +217,54 @@ struct UnifiedRecommendationCard: View {
     let onCancel: (() -> Void)?
     let onRetry: (() -> Void)?
 
+    private var matchPercent: Int {
+        Int((recommendation.score.score * 100).rounded())
+    }
+
+    private var matchTint: Color {
+        switch matchPercent {
+        case 75...:    return CurbyGlass.successTint
+        case 55..<75:  return CurbyGlass.primaryTint
+        case 40..<55:  return CurbyGlass.warningTint
+        default:       return CurbyGlass.destinationTint
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
-                Text(recommendation.area.name)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
+            // Header — name on the left, big real % match on the right.
+            // Replaces the previous fuzzy "Strong match / Okay option"
+            // labels with an actual score the user asked for.
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(recommendation.area.name)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    Text(recommendation.area.categoryLabel)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
 
                 Spacer()
 
-                Text(recommendation.area.categoryLabel)
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(CurbyGlass.primaryTint))
+                VStack(alignment: .trailing, spacing: 0) {
+                    Text("\(matchPercent)%")
+                        .font(.system(size: 26, weight: .bold, design: .rounded))
+                        .foregroundStyle(matchTint)
+                    Text("Match")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .tracking(0.6)
+                }
             }
 
             CompactMetricRow(
                 walkMinutes: max(1, Int(round(recommendation.route.walkTimeSec / 60))),
                 driveMinutes: max(1, Int(round(recommendation.route.travelTimeSec / 60))),
-                trafficScore: recommendation.score.breakdown.congestion,
-                customLabel: recommendation.matchQualityShortLabel
+                trafficScore: recommendation.score.breakdown.congestion
             )
 
             Button {
@@ -248,10 +272,10 @@ struct UnifiedRecommendationCard: View {
                 onNavigate()
             } label: {
                 Text("Navigate")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 11)
+                    .padding(.vertical, 12)
                     .curbyGlassSurface(tint: CurbyGlass.primaryTint, cornerRadius: CurbyGlass.compactCornerRadius)
             }
             .buttonStyle(.plain)
