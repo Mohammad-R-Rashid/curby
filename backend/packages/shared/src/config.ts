@@ -75,14 +75,18 @@ export const DEFAULT_CONFIG: CurbyRemoteConfig = {
   },
 
   algorithm: {
+    // Weights tuned so "the parking right next to the destination" wins by
+    // default. Previously walkDistance=0.10 / travelTime=0.24, which let a
+    // close-to-the-user-but-far-from-the-destination lot (e.g. a church on
+    // the way) outscore the obvious mall garage at wider search radii.
     weights: {
-      availability: 0.28,
-      turnover: 0.10,
-      travelTime: 0.24,
-      congestion: 0.18,
-      walkDistance: 0.10,
+      availability: 0.20,
+      turnover: 0.08,
+      travelTime: 0.14,
+      congestion: 0.13,
+      walkDistance: 0.32,
       loadBalance: 0.05,
-      confidence: 0.05,
+      confidence: 0.08,
     },
     estimatedCapacityPerArea: 50,
     recentDepartureWindowMin: 15,
@@ -90,7 +94,11 @@ export const DEFAULT_CONFIG: CurbyRemoteConfig = {
     reEvaluationIntervalSec: 120,
     scoreUpdateThreshold: 15,
     travelTimeDecayMin: 10,
-    walkTimeDecayMin: 8,
+    // Sharper decay than before (was 8). 5 means a 5-min walk halves the
+    // walk score and a 10-min walk drops to ~0.25 — punishes long walks
+    // from parking to destination instead of treating them as nearly
+    // equivalent to a 1-min walk.
+    walkTimeDecayMin: 5,
     loadPenaltyK: 3,
     confidenceMinUsers: 10,
   },

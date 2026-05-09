@@ -140,11 +140,21 @@ export async function searchOsmParkingAreas(
       const center = elementCenter(el);
       if (!center) continue;
 
-
       const d = distanceMeters(destination, center);
       if (d > radiusMeters + 35) continue;
 
       const tags = el.tags ?? {};
+
+      // Only surface OSM areas that have a real human-readable name. The
+      // fallback "OSM parking · osm/way/123" was leaking into recommendation
+      // cards and the user-facing list. Mapbox already covers named lots
+      // for the same area; named-only OSM acts as a useful supplement
+      // without polluting the UI.
+      const trimmedName = (tags.name || '').trim();
+      const trimmedRef = (tags.ref || '').trim();
+      const trimmedStreet = (tags['addr:street'] || tags['addr:full'] || '').trim();
+      if (!trimmedName && !trimmedRef && !trimmedStreet) continue;
+
       const id = `osm/${el.type}/${el.id}`;
       if (seen.has(id)) continue;
       seen.add(id);
