@@ -306,6 +306,11 @@ struct MainNavigationView: View {
                 // User location puck
                 Puck2D(bearing: .heading)
 
+                // Live per-segment traffic. Self-driven by Mapbox's traffic
+                // vector tiles — no client-side state, no per-area polygons.
+                // Hidden below LiveTrafficMapStyleContent.minimumZoom.
+                LiveTrafficMapStyleContent()
+
                 // Geo-fenced busy/open zones — rendered at all zoom levels
                 ParkingZoneMapStyleContent(
                     zones: heatZoneManager.heatZones,
