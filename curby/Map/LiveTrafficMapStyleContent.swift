@@ -17,18 +17,23 @@ import MapboxMaps
 import UIKit
 
 struct LiveTrafficMapStyleContent: MapStyleContent {
-    /// Map zoom below which the traffic overlay is hidden. Tuned so the
-    /// layer kicks in around neighborhood zoom — at city zoom every road
-    /// gets a colored stripe and labels become unreadable.
-    static let minimumZoom: Double = 13.5
+    /// Map zoom below which the traffic overlay is hidden. Lowered to 12
+    /// while we verify the layer is actually rendering on Standard v3 —
+    /// can be tightened back up once we're happy with how it looks.
+    static let minimumZoom: Double = 12.0
 
     private let sourceID = "curby-live-traffic-source"
     private let lineLayerID = "curby-live-traffic-line-layer"
 
-    private let lowColor = UIColor(red: 0.42, green: 0.82, blue: 0.45, alpha: 1.0)      // green
-    private let moderateColor = UIColor(red: 0.95, green: 0.80, blue: 0.20, alpha: 1.0)  // yellow
-    private let heavyColor = UIColor(red: 1.00, green: 0.62, blue: 0.30, alpha: 1.0)     // orange
-    private let severeColor = UIColor(red: 0.96, green: 0.34, blue: 0.28, alpha: 1.0)    // red
+    private let lowColor = UIColor(red: 0.42, green: 0.82, blue: 0.45, alpha: 1.0)       // green
+    private let moderateColor = UIColor(red: 0.95, green: 0.80, blue: 0.20, alpha: 1.0)   // yellow
+    private let heavyColor = UIColor(red: 1.00, green: 0.62, blue: 0.30, alpha: 1.0)      // orange
+    private let severeColor = UIColor(red: 0.96, green: 0.34, blue: 0.28, alpha: 1.0)     // red
+    /// Visible-but-muted gray for road segments where Mapbox has no live
+    /// data ("unknown" / null). Without this the missing-data fallback was
+    /// `.clear`, which hid the entire layer in any region with sparse
+    /// traffic coverage.
+    private let unknownColor = UIColor(white: 0.6, alpha: 1.0)
 
     var body: some MapStyleContent {
         VectorSource(id: sourceID)
@@ -39,7 +44,11 @@ struct LiveTrafficMapStyleContent: MapStyleContent {
             .minZoom(Self.minimumZoom)
             .lineCap(.round)
             .lineJoin(.round)
-            .slot(.middle)
+            // `.top` (not `.middle`) so we render above all base-map road
+            // sub-layers in the Standard style. `.middle` was placing the
+            // layer between two of Standard's road passes, so the upper
+            // road fill was painting over our colored ribbons.
+            .slot(.top)
             .lineColor(
                 Exp(.match) {
                     Exp(.get) { "congestion" }
@@ -51,18 +60,16 @@ struct LiveTrafficMapStyleContent: MapStyleContent {
                     heavyColor
                     "severe"
                     severeColor
-                    UIColor.clear
+                    unknownColor
                 }
             )
-            // Fade the layer in as the user zooms past the threshold so it
-            // doesn't pop into existence; fully on by zoom 14.
             .lineOpacity(
                 Exp(.interpolate) {
                     Exp(.linear)
                     Exp(.zoom)
-                    13.5
+                    12.0
                     0.0
-                    14.0
+                    13.0
                     0.85
                     18.0
                     0.9
@@ -74,14 +81,16 @@ struct LiveTrafficMapStyleContent: MapStyleContent {
                 Exp(.interpolate) {
                     Exp(.linear)
                     Exp(.zoom)
-                    13.5
-                    1.5
+                    12.0
+                    2.0
+                    14.0
+                    3.5
                     16.0
-                    3.0
-                    18.0
                     5.0
+                    18.0
+                    7.0
                     20.0
-                    8.0
+                    10.0
                 }
             )
     }
