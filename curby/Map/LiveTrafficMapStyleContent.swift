@@ -44,14 +44,14 @@ struct LiveTrafficMapStyleContent: MapStyleContent {
                 Exp(.match) {
                     Exp(.get) { "congestion" }
                     "low"
-                    StyleColor(lowColor)
+                    lowColor
                     "moderate"
-                    StyleColor(moderateColor)
+                    moderateColor
                     "heavy"
-                    StyleColor(heavyColor)
+                    heavyColor
                     "severe"
-                    StyleColor(severeColor)
-                    StyleColor(UIColor.clear)
+                    severeColor
+                    UIColor.clear
                 }
             )
             // Fade the layer in as the user zooms past the threshold so it
