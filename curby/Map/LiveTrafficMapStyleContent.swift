@@ -25,15 +25,13 @@ struct LiveTrafficMapStyleContent: MapStyleContent {
     private let sourceID = "curby-live-traffic-source"
     private let lineLayerID = "curby-live-traffic-line-layer"
 
-    private let lowColor = UIColor(red: 0.42, green: 0.82, blue: 0.45, alpha: 1.0)       // green
+    // Free-flow ("low") and "unknown" segments are deliberately drawn as
+    // clear — painting every road green/gray was visual noise. The base-
+    // map style already conveys "normal road" on its own, so we only
+    // surface segments that are actually problematic.
     private let moderateColor = UIColor(red: 0.95, green: 0.80, blue: 0.20, alpha: 1.0)   // yellow
     private let heavyColor = UIColor(red: 1.00, green: 0.62, blue: 0.30, alpha: 1.0)      // orange
     private let severeColor = UIColor(red: 0.96, green: 0.34, blue: 0.28, alpha: 1.0)     // red
-    /// Visible-but-muted gray for road segments where Mapbox has no live
-    /// data ("unknown" / null). Without this the missing-data fallback was
-    /// `.clear`, which hid the entire layer in any region with sparse
-    /// traffic coverage.
-    private let unknownColor = UIColor(white: 0.6, alpha: 1.0)
 
     var body: some MapStyleContent {
         VectorSource(id: sourceID)
@@ -52,15 +50,13 @@ struct LiveTrafficMapStyleContent: MapStyleContent {
             .lineColor(
                 Exp(.match) {
                     Exp(.get) { "congestion" }
-                    "low"
-                    lowColor
                     "moderate"
                     moderateColor
                     "heavy"
                     heavyColor
                     "severe"
                     severeColor
-                    unknownColor
+                    UIColor.clear
                 }
             )
             .lineOpacity(
