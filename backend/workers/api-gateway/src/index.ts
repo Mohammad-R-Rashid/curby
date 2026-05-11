@@ -7,6 +7,7 @@ import { handleTelemetry } from './routes/telemetry.js';
 import { handleParkEvent, handleDepartEvent } from './routes/events.js';
 import { handleConfig } from './routes/config.js';
 import { handleWebSocketUpgrade } from './routes/websocket.js';
+import { handleParkingHeatMap } from './routes/heat-map.js';
 
 // Re-export the Durable Object class so Wrangler bundles it
 export { RegionCoordinatorDO } from './durable-objects/RegionCoordinatorDO.js';
@@ -59,6 +60,11 @@ export default {
         // Remote config → KV
         case path === '/v1/config' && method === 'GET':
           response = await handleConfig(request, env);
+          break;
+
+        // Parking heat map → Mapbox vector tiles + Supabase
+        case path === '/v1/parking-heat-map' && method === 'GET':
+          response = await handleParkingHeatMap(request, env);
           break;
 
         // WebSocket upgrade → Durable Object

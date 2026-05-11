@@ -60,6 +60,43 @@ export interface CurbyRemoteConfig {
     uploadIntervalSec: number;
     minDistanceMeters: number;
   };
+
+  /**
+   * Parking heat map — colored polygon tiles served by `/v1/parking-heat-map`.
+   * Separate from `algorithm` because the heat map answers a different
+   * question ("how hard is parking *here*?") than the recommendation
+   * picker ("which lot is best?") and is tuned independently.
+   */
+  heatMap: {
+    /** Number of clusters / tiles per response. */
+    clusterCount: number;
+    /** Default search radius if the client doesn't supply one. */
+    defaultRadiusMeters: number;
+    /** Hard upper bound to keep compute bounded. */
+    maxRadiusMeters: number;
+    /** Cache TTL — clients can re-issue more frequently and hit the KV layer. */
+    cacheTtlSec: number;
+    /** Score factor weights — must roughly sum to 1.0 (normalized internally). */
+    weights: {
+      /** Penalize blocks on jammed roads. */
+      congestion: number;
+      /** Penalize blocks crowded with currently-parked users. */
+      density: number;
+      /** Reward blocks with high recent departure rate. */
+      turnover: number;
+    };
+    /** Window for "recent" departures, in minutes. */
+    recentDepartureWindowMin: number;
+    /** Active-parks-per-hectare value treated as "full". Density above this → fDensity = 0. */
+    parksPerHectareFull: number;
+    /** Departures-per-minute treated as max turnover. */
+    departsPerMinFullTurnover: number;
+    /** Score band thresholds for Easy / Medium / Hard. */
+    bands: {
+      easyMin: number;   // score >= easyMin → Easy
+      hardMax: number;   // score <  hardMax → Hard, otherwise Medium
+    };
+  };
 }
 
 /** Default configuration — used as fallback if KV is empty. */
@@ -117,6 +154,25 @@ export const DEFAULT_CONFIG: CurbyRemoteConfig = {
     uploadIntervalSec: 5,
     minDistanceMeters: 10,
   },
+
+  heatMap: {
+    clusterCount: 5,
+    defaultRadiusMeters: 640, // ~0.4 mi — same as the default walking geofence
+    maxRadiusMeters: 2000,
+    cacheTtlSec: 60,
+    weights: {
+      congestion: 0.45,
+      density: 0.35,
+      turnover: 0.20,
+    },
+    recentDepartureWindowMin: 15,
+    parksPerHectareFull: 50,
+    departsPerMinFullTurnover: 2.0,
+    bands: {
+      easyMin: 0.67,
+      hardMax: 0.34,
+    },
+  },
 };
 
 /**
@@ -155,6 +211,12 @@ export async function getConfig(kv: KVNamespace): Promise<CurbyRemoteConfig> {
         },
         search: { ...DEFAULT_CONFIG.search, ...r.search },
         telemetry: { ...DEFAULT_CONFIG.telemetry, ...r.telemetry },
+        heatMap: {
+          ...DEFAULT_CONFIG.heatMap,
+          ...r.heatMap,
+          weights: { ...DEFAULT_CONFIG.heatMap.weights, ...r.heatMap?.weights },
+          bands: { ...DEFAULT_CONFIG.heatMap.bands, ...r.heatMap?.bands },
+        },
       };
       cacheTimestamp = now;
       return cachedConfig;

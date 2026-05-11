@@ -51,7 +51,17 @@ export {
 // OSM + merged discovery
 export { searchOsmParkingAreas, classifyOsmParkingCategory } from './osm.js';
 export { discoverParkingAreas } from './parking-discovery.js';
-export { distanceMeters, isWithinAustinArea, AUSTIN_BBOX } from './geo.js';
+export { distanceMeters } from './geo.js';
 
 // Supabase
 export { getSupabase } from './supabase.js';
+
+// Heat map
+export type {
+  HeatMapDifficulty,
+  HeatMapGeometry,
+  HeatMapResponse,
+  HeatMapTile,
+  HeatMapInputs,
+} from './heat-map/index.js';
+export { computeHeatMap } from './heat-map/index.js';
