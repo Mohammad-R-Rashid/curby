@@ -31,6 +31,7 @@ struct MainNavigationView: View {
     @State private var telemetryUploader: TelemetryUploader
     @State private var parkingEventDetector: ParkingEventDetector
     @State private var parkingWebSocketManager: ParkingWebSocketManager
+    @State private var parkingHeatMapManager: ParkingHeatMapManager
     @State private var searchState = SearchState()
     @State private var liveActivityController = LiveParkingActivityController()
     /// True from the moment the user taps Navigate until they clear the
@@ -111,6 +112,7 @@ struct MainNavigationView: View {
             apiClient: apiClient,
             remoteConfigService: remoteConfig
         )
+        let parkingHeatMapManager = ParkingHeatMapManager(apiClient: apiClient)
 
         _locationService = State(initialValue: location)
         _remoteConfigService = State(initialValue: remoteConfig)
@@ -118,6 +120,7 @@ struct MainNavigationView: View {
         _cameraController = State(initialValue: camera)
         _telemetryUploader = State(initialValue: telemetryUploader)
         _parkingEventDetector = State(initialValue: parkingEventDetector)
+        _parkingHeatMapManager = State(initialValue: parkingHeatMapManager)
         _parkingWebSocketManager = State(initialValue: parkingWebSocketManager)
     }
 
@@ -310,6 +313,12 @@ struct MainNavigationView: View {
                 // vector tiles — no client-side state, no per-area polygons.
                 // Hidden below LiveTrafficMapStyleContent.minimumZoom.
                 LiveTrafficMapStyleContent()
+
+                // Parking heat map — Easy / Medium / Hard polygon tiles
+                // around the active destination or hotspot. Drawn in the
+                // `.bottom` slot so the base-map roads and the traffic
+                // overlay above still read clearly.
+                ParkingHeatMapMapStyleContent(tiles: parkingHeatMapManager.tiles)
 
                 // Geo-fenced busy/open zones — rendered at all zoom levels
                 ParkingZoneMapStyleContent(
@@ -669,6 +678,7 @@ struct MainNavigationView: View {
             userLocation: locationService.currentLocation?.coordinate,
             walkingRadiusMeters: walkingGeofenceMeters
         )
+        parkingHeatMapManager.setAnchor(dest.coordinate, radiusM: walkingGeofenceMeters)
         cameraController.navigateToDestination(dest.coordinate)
         sheetDetent = .fraction(0.25)
         Task {
@@ -697,6 +707,7 @@ struct MainNavigationView: View {
             userLocation: locationService.currentLocation?.coordinate,
             walkingRadiusMeters: walkingGeofenceMeters
         )
+        parkingHeatMapManager.setAnchor(place.coordinate, radiusM: walkingGeofenceMeters)
         cameraController.navigateToDestination(place.coordinate)
         sheetDetent = .fraction(0.30)
     }
@@ -705,6 +716,7 @@ struct MainNavigationView: View {
         exploredPlace = nil
         selectedParkingArea = nil
         parkingAreaManager.clear()
+        parkingHeatMapManager.clear()
         heatZoneManager.clearZones()
         liveActivityController.end()
         isNavigating = false
@@ -758,6 +770,7 @@ struct MainNavigationView: View {
             userLocation: locationService.currentLocation?.coordinate,
             walkingRadiusMeters: walkingGeofenceMeters
         )
+        parkingHeatMapManager.setAnchor(destination.coordinate, radiusM: walkingGeofenceMeters)
 
         guard retryBackend else { return }
 
@@ -965,6 +978,7 @@ struct MainNavigationView: View {
                     CurbyHaptics.light()
                     Task { await parkingWebSocketManager.cancelSearch() }
                     parkingAreaManager.clear()
+                    parkingHeatMapManager.clear()
                     heatZoneManager.clearZones()
                     liveActivityController.end()
                     isNavigating = false

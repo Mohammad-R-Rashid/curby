@@ -95,6 +95,34 @@ final class CurbyAPIClient {
         try await postJSON(payload, path: "/v1/events/depart", expectedStatusCodes: [200, 404])
     }
 
+    /// Fetch the parking heat-map tiles around a given anchor. The server
+    /// caches at 60s, so callers can poll at that cadence without thrashing
+    /// the worker's compute path.
+    func fetchParkingHeatMap(
+        anchor: CLLocationCoordinate2D,
+        radiusM: Double
+    ) async throws -> CurbyHeatMapResponse {
+        var request = URLRequest(url: buildURL(path: "/v1/parking-heat-map", queryItems: [
+            URLQueryItem(name: "lat", value: String(anchor.latitude)),
+            URLQueryItem(name: "lng", value: String(anchor.longitude)),
+            URLQueryItem(name: "radiusM", value: String(Int(radiusM.rounded())))
+        ]))
+        request.httpMethod = "GET"
+        request.setValue(userID, forHTTPHeaderField: "X-User-Id")
+
+        let (data, response) = try await session.data(for: request)
+        let httpResponse = try validatedHTTPResponse(response)
+
+        guard httpResponse.statusCode == 200 else {
+            throw CurbyAPIClientError.badStatusCode(
+                httpResponse.statusCode,
+                String(data: data, encoding: .utf8)
+            )
+        }
+
+        return try decoder.decode(CurbyHeatMapResponse.self, from: data)
+    }
+
     func webSocketRequest(for location: CLLocationCoordinate2D) throws -> URLRequest {
         guard var components = URLComponents(
             url: buildURL(path: "/v1/park"),

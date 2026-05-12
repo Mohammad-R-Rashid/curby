@@ -288,6 +288,140 @@ struct CurbyHeartbeatAckEvent: Codable {
     let type: String
 }
 
+// MARK: - Parking Heat Map
+
+/// Coarse difficulty bucket served as the primary visual cue on heat tiles.
+/// Mirrors backend `HeatMapDifficulty` strings exactly.
+enum CurbyHeatMapDifficulty: String, Codable, Hashable {
+    case easy
+    case medium
+    case hard
+}
+
+/// One Polygon or MultiPolygon coming off the wire. We keep raw `[Double]`
+/// nesting (instead of `CLLocationCoordinate2D` arrays) so the JSON shape
+/// matches GeoJSON exactly; conversion happens in the render layer.
+struct CurbyHeatMapGeometry: Codable, Hashable {
+    let type: String
+    /// `Polygon`  → [[[lng, lat], ...]]            — array of rings
+    /// `MultiPolygon` → [[[[lng, lat], ...], ...]] — array of polygons
+    private let rawCoordinates: AnyCodable
+
+    var isMultiPolygon: Bool { type == "MultiPolygon" }
+
+    /// Returns one or more rings-of-rings. For Polygon this is `[polygonRings]`;
+    /// for MultiPolygon it's `[polygon1Rings, polygon2Rings, ...]`.
+    var polygons: [[[CLLocationCoordinate2D]]] {
+        if isMultiPolygon {
+            guard let outer = rawCoordinates.value as? [[[[Double]]]] else { return [] }
+            return outer.map { rings in rings.map(Self.ringToCoordinates) }
+        } else {
+            guard let rings = rawCoordinates.value as? [[[Double]]] else { return [] }
+            return [rings.map(Self.ringToCoordinates)]
+        }
+    }
+
+    private static func ringToCoordinates(_ ring: [[Double]]) -> [CLLocationCoordinate2D] {
+        ring.compactMap { pair in
+            guard pair.count == 2 else { return nil }
+            return CLLocationCoordinate2D(latitude: pair[1], longitude: pair[0])
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case rawCoordinates = "coordinates"
+    }
+}
+
+struct CurbyHeatMapStats: Codable, Hashable {
+    let blockCount: Int
+    let avgCongestion: Double
+    let activeParks: Int
+    let recentDepartures: Int
+    let areaSqM: Double
+}
+
+struct CurbyHeatMapTile: Codable, Hashable, Identifiable {
+    let id: String
+    let geometry: CurbyHeatMapGeometry
+    let score: Double
+    let label: CurbyHeatMapDifficulty
+    /// Hex color suggested by the backend; matches the iOS palette.
+    let tint: String
+    let stats: CurbyHeatMapStats
+}
+
+struct CurbyHeatMapResponse: Codable, Hashable {
+    let tiles: [CurbyHeatMapTile]
+    let anchor: CurbyLatLng
+    let radiusM: Double
+    let clusterCount: Int
+    let computedAt: String
+    /// True when no `active_parks` rows existed in the query area; the
+    /// score is congestion-only, so the UI can show a "low confidence" badge.
+    let fallback: Bool
+}
+
+/// Tiny `Any` wrapper that round-trips arbitrary JSON arrays — used inside
+/// `CurbyHeatMapGeometry` so Polygon and MultiPolygon coordinate nestings
+/// can both live in one Codable struct without two parallel decoding paths.
+private struct AnyCodable: Codable, Hashable {
+    let value: Any
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let nested = try? container.decode([[[[Double]]]].self) {
+            self.value = nested
+        } else if let nested = try? container.decode([[[Double]]].self) {
+            self.value = nested
+        } else if let nested = try? container.decode([[Double]].self) {
+            self.value = nested
+        } else {
+            self.value = [] as [Any]
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        if let v = value as? [[[[Double]]]] {
+            try container.encode(v)
+        } else if let v = value as? [[[Double]]] {
+            try container.encode(v)
+        } else if let v = value as? [[Double]] {
+            try container.encode(v)
+        } else {
+            try container.encode([[Double]]())
+        }
+    }
+
+    func hash(into hasher: inout Hasher) {
+        // Hash a structural digest — full coord arrays are large but stable
+        // for a given response, and Identifiable.id covers the common path.
+        if let v = value as? [[[[Double]]]] {
+            hasher.combine("mp")
+            hasher.combine(v.count)
+        } else if let v = value as? [[[Double]]] {
+            hasher.combine("p")
+            hasher.combine(v.count)
+        } else {
+            hasher.combine("0")
+        }
+    }
+
+    static func == (lhs: AnyCodable, rhs: AnyCodable) -> Bool {
+        // Structural equality is good enough for our use; full coord
+        // comparisons are expensive and unnecessary.
+        if let a = lhs.value as? [[[[Double]]]], let b = rhs.value as? [[[[Double]]]] {
+            return a.count == b.count
+        }
+        if let a = lhs.value as? [[[Double]]], let b = rhs.value as? [[[Double]]] {
+            return a.count == b.count
+        }
+        return false
+    }
+}
+
 enum CurbyWebSocketEvent {
     case recommendation(CurbyParkingRecommendation)
     case routeUpdate(CurbyParkingRecommendation)
