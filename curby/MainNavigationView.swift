@@ -1940,12 +1940,12 @@ private struct SavedParkMapPin: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 ZStack {
                     // Pulsing halo so the pin is unmistakable on a busy map.
                     Circle()
-                        .stroke(tint.opacity(0.45), lineWidth: 3)
-                        .frame(width: 38, height: 38)
+                        .stroke(tint.opacity(0.45), lineWidth: 2.5)
+                        .frame(width: 28, height: 28)
                         .scaleEffect(pulse ? 1.4 : 1.0)
                         .opacity(pulse ? 0 : 1)
                         .animation(
@@ -1957,34 +1957,34 @@ private struct SavedParkMapPin: View {
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .foregroundStyle(.white)
-                        .frame(width: 18, height: 18)
-                        .frame(width: 32, height: 32)
+                        .frame(width: 13, height: 13)
+                        .frame(width: 24, height: 24)
                         .background(tint.gradient, in: Circle())
                         .overlay(
                             Circle()
-                                .strokeBorder(.white, lineWidth: 2)
+                                .strokeBorder(.white, lineWidth: 1.5)
                         )
                 }
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 1) {
                     Text("Your Car")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
                         .foregroundStyle(tint)
                     Text(title)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                 }
             }
-            .padding(.leading, 6)
-            .padding(.trailing, 14)
-            .padding(.vertical, 6)
-            .curbyGlassSurface(tint: tint, cornerRadius: 22)
-            .shadow(color: tint.opacity(0.35), radius: 10, y: 4)
+            .padding(.leading, 4)
+            .padding(.trailing, 10)
+            .padding(.vertical, 4)
+            .curbyGlassSurface(tint: tint, cornerRadius: 16)
+            .shadow(color: tint.opacity(0.35), radius: 6, y: 3)
 
             Triangle()
                 .fill(tint)
-                .frame(width: 12, height: 7)
+                .frame(width: 10, height: 6)
                 .rotationEffect(.degrees(180))
                 .offset(y: -1)
         }
