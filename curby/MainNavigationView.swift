@@ -281,11 +281,11 @@ struct MainNavigationView: View {
             value: cameraController.showRecenterButton
         )
         .confirmationDialog(
-            "Remove parked location?",
+            "Your Car",
             isPresented: $showRemoveParkedConfirm,
             titleVisibility: .visible
         ) {
-            Button("Remove", role: .destructive) {
+            Button("Clear parking", role: .destructive) {
                 CurbyHaptics.medium()
                 Task { await clearSavedParkPinIfPresent() }
             }
@@ -293,7 +293,7 @@ struct MainNavigationView: View {
                 CurbyHaptics.light()
             }
         } message: {
-            Text("Clears your spot from the live map.")
+            Text(savedParkPin.map { "Parked at \($0.title)" } ?? "Parked here")
         }
     }
 
