@@ -73,7 +73,9 @@ export function attachTrafficToBlocks(
   }
 
   for (let i = 0; i < blocks.length; i++) {
-    blocks[i].scoreInputs.congestion = counts[i] > 0 ? sums[i] / counts[i] : 0.15;
+    // No segments attached → treat the block as free-flowing (green),
+    // matching how individual `unknown` segments are handled.
+    blocks[i].scoreInputs.congestion = counts[i] > 0 ? sums[i] / counts[i] : 0.0;
   }
 }
 

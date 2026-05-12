@@ -266,8 +266,10 @@ export function congestionLevelToNumber(level: TrafficSegment['congestion']): nu
       return 1.0;
     case 'unknown':
     default:
-      // Mild prior — "we don't know, assume free-flow-ish".
-      return 0.15;
+      // No data → treat the same as free-flow. Mapbox traffic-v1 only
+      // covers major streets; calling unknown "free-flow" keeps the
+      // uncovered residential grid out of the orange/red bucket.
+      return 0.0;
   }
 }
 
