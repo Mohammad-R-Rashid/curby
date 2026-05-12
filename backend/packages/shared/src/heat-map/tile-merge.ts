@@ -80,9 +80,29 @@ export function buildTiles(
 
 function unionBlocks(blocks: Block[]): HeatMapGeometry | null {
   if (blocks.length === 0) return null;
-  if (blocks.length === 1) return blocks[0].polygon;
 
-  const polys = blocks.map((b) => turfPolygon(b.polygon.coordinates));
+  // Defensive: drop any block whose polygon has a ring with fewer than
+  // 4 positions. turfPolygon() throws on those, and a single bad block
+  // would otherwise crash the whole heat-map request with a 502.
+  const valid = blocks.filter((b) => {
+    const rings = b.polygon.coordinates;
+    return rings.length > 0 && rings.every((r) => r && r.length >= 4);
+  });
+
+  if (valid.length === 0) return null;
+  if (valid.length === 1) return valid[0].polygon;
+
+  const polys: ReturnType<typeof turfPolygon>[] = [];
+  for (const b of valid) {
+    try {
+      polys.push(turfPolygon(b.polygon.coordinates));
+    } catch (e) {
+      console.error('heat-map turfPolygon rejected block:', e);
+    }
+  }
+  if (polys.length === 0) return null;
+  if (polys.length === 1) return valid[0].polygon;
+
   // turf v7: union takes a FeatureCollection<Polygon|MultiPolygon> and
   // returns a single Feature. Falls back to the first polygon if the
   // union resolves to null (shouldn't happen for contiguous inputs).
@@ -91,10 +111,10 @@ function unionBlocks(blocks: Block[]): HeatMapGeometry | null {
     merged = union(featureCollection(polys));
   } catch (e) {
     console.error('heat-map tile union failed:', e);
-    return blocks[0].polygon;
+    return valid[0].polygon;
   }
 
-  if (!merged || !merged.geometry) return blocks[0].polygon;
+  if (!merged || !merged.geometry) return valid[0].polygon;
 
   const g = merged.geometry;
   if (g.type === 'Polygon') {
@@ -106,7 +126,7 @@ function unionBlocks(blocks: Block[]): HeatMapGeometry | null {
       coordinates: g.coordinates as [number, number][][][],
     };
   }
-  return blocks[0].polygon;
+  return valid[0].polygon;
 }
 
 function labelFor(

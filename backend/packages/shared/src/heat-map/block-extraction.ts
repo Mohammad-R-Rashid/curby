@@ -45,7 +45,12 @@ export function extractBlocks(
     if (feat.geometry.type !== 'Polygon') continue;
 
     const coords = feat.geometry.coordinates as [number, number][][];
-    if (!coords[0] || coords[0].length < 4) continue;
+    // Every ring (outer + any holes) must have at least 4 positions to
+    // form a valid LinearRing. Earlier we only validated the outer ring,
+    // which let polygons with degenerate hole rings reach turf and blow
+    // up the whole request with a 502.
+    if (coords.length === 0) continue;
+    if (coords.some((ring) => !ring || ring.length < 4)) continue;
 
     const cFeat = centroid(feat);
     const cLng = cFeat.geometry.coordinates[0];
