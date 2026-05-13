@@ -67,8 +67,13 @@ export async function handleParkingHeatMap(request: Request, env: Env): Promise<
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'heat-map compute failed';
-    console.error('heat-map compute error:', message);
-    return new Response(JSON.stringify({ error: message }), {
+    const stack = err instanceof Error ? err.stack : undefined;
+    // Surface the stack in the response body too while we're hunting
+    // a polygonize edge case — `wrangler tail` is great but slow to
+    // reach for, and the body is easier to share back over chat. Pull
+    // this back once the bug is squashed.
+    console.error('heat-map compute error:', message, '\n', stack);
+    return new Response(JSON.stringify({ error: message, stack }), {
       status: 502,
       headers: { 'Content-Type': 'application/json' },
     });
