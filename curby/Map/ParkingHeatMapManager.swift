@@ -94,16 +94,23 @@ final class ParkingHeatMapManager {
         guard let anchor = currentAnchor else { return }
         let radius = currentRadiusM
         isLoading = true
+
+        heatMapLogger.info("Fetching heat map: lat=\(anchor.latitude, privacy: .public), lng=\(anchor.longitude, privacy: .public), radiusM=\(radius, privacy: .public)")
+
         do {
             let response = try await apiClient.fetchParkingHeatMap(
                 anchor: anchor,
                 radiusM: radius
             )
+
+            heatMapLogger.info("Heat map response: tiles=\(response.tiles.count, privacy: .public), fallback=\(response.fallback, privacy: .public), labels=\(response.tiles.map(\.label.rawValue).joined(separator: ","), privacy: .public)")
+
             // Guard against an anchor change mid-flight — drop stale payloads.
             guard let cur = currentAnchor,
                   sameCoordinate(cur, anchor),
                   abs(currentRadiusM - radius) < 1
             else {
+                heatMapLogger.info("Dropping stale heat-map response — anchor moved")
                 isLoading = false
                 return
             }
@@ -114,6 +121,9 @@ final class ParkingHeatMapManager {
             // the data hasn't actually changed.
             if !tilesAreEquivalent(tiles, response.tiles) {
                 tiles = response.tiles
+                heatMapLogger.info("Tiles assigned: \(response.tiles.count, privacy: .public)")
+            } else {
+                heatMapLogger.info("Tiles unchanged — skipping reassignment")
             }
             fallback = response.fallback
             lastErrorMessage = nil
