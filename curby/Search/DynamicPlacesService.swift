@@ -33,8 +33,20 @@ final class DynamicPlacesService {
     private let debounceMilliseconds: UInt64 = 1_200
     /// Don't refetch while panning inside this radius of the last fetch.
     private let refetchDistanceMeters: Double = 1_500
-    /// Radius around the map center we ask Overpass for.
-    private let searchRadiusMeters: Int = 9_000
+    /// Radius around the map center we ask Overpass for. Trimmed from 9 km
+    /// since Overpass scales poorly with query area — at 5 km the response
+    /// is roughly 5× faster while still surfacing every relevant landmark
+    /// for a parking-app user (mall, university, stadium, etc.).
+    private let searchRadiusMeters: Int = 5_000
+    /// How long a disk-cached result is considered fresh enough to display
+    /// before we trigger a background refresh.
+    private let cacheTtlSec: TimeInterval = 6 * 60 * 60
+
+    private static let cacheKey = "curby.dynamic-places.cache.v1"
+
+    init() {
+        loadCacheFromDisk()
+    }
 
     /// Schedule a fetch if the center has moved beyond `refetchDistanceMeters`
     /// since the last successful fetch.
@@ -50,6 +62,76 @@ final class DynamicPlacesService {
             try? await Task.sleep(nanoseconds: debounceMilliseconds * 1_000_000)
             guard !Task.isCancelled else { return }
             await fetch(around: center)
+        }
+    }
+
+    // MARK: - Disk cache
+
+    private struct CachedPayload: Codable {
+        let centerLat: Double
+        let centerLng: Double
+        let savedAt: Date
+        let places: [Persisted]
+
+        struct Persisted: Codable {
+            let id: UUID
+            let name: String
+            let sfSymbol: String
+            let lat: Double
+            let lng: Double
+            let subtitle: String
+        }
+    }
+
+    private func loadCacheFromDisk() {
+        guard let data = UserDefaults.standard.data(forKey: Self.cacheKey),
+              let payload = try? JSONDecoder().decode(CachedPayload.self, from: data)
+        else { return }
+
+        let restored = payload.places.map { p in
+            PopularLocation(
+                id: p.id,
+                name: p.name,
+                sfSymbol: p.sfSymbol,
+                coordinate: CLLocationCoordinate2D(latitude: p.lat, longitude: p.lng),
+                busyLevel: .open,
+                subtitle: p.subtitle
+            )
+        }
+
+        self.places = restored
+        self.lastFetchedCenter = CLLocationCoordinate2D(
+            latitude: payload.centerLat,
+            longitude: payload.centerLng
+        )
+
+        // If the cache is stale, leave lastFetchedCenter unset so the next
+        // `fetchIfNeeded` call will refresh. The cached places stay on
+        // screen while the refetch runs, so the user never sees an empty
+        // hotspot rail.
+        if Date().timeIntervalSince(payload.savedAt) > cacheTtlSec {
+            self.lastFetchedCenter = nil
+        }
+    }
+
+    private func saveCacheToDisk(center: CLLocationCoordinate2D, places: [PopularLocation]) {
+        let payload = CachedPayload(
+            centerLat: center.latitude,
+            centerLng: center.longitude,
+            savedAt: Date(),
+            places: places.map { p in
+                CachedPayload.Persisted(
+                    id: p.id,
+                    name: p.name,
+                    sfSymbol: p.sfSymbol,
+                    lat: p.coordinate.latitude,
+                    lng: p.coordinate.longitude,
+                    subtitle: p.subtitle
+                )
+            }
+        )
+        if let data = try? JSONEncoder().encode(payload) {
+            UserDefaults.standard.set(data, forKey: Self.cacheKey)
         }
     }
 
@@ -138,11 +220,14 @@ final class DynamicPlacesService {
             let finalPlaces = Array(sorted.prefix(10))
             if !finalPlaces.isEmpty {
                 self.places = finalPlaces
+                saveCacheToDisk(center: center, places: finalPlaces)
             }
             self.lastFetchedCenter = center
         } catch {
-            // Overpass occasionally returns 429 / timeouts under load — keep
-            // showing the previous list and try again on the next pan.
+            // Overpass occasionally returns 429 / timeouts under load —
+            // record the attempt so we don't retry on the next minor pan,
+            // and keep showing whatever we already have on screen.
+            self.lastFetchedCenter = center
         }
     }
 
