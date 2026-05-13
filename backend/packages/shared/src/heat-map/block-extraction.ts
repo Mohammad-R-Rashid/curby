@@ -28,12 +28,30 @@ export function extractBlocks(
 ): Block[] {
   if (roads.length < 3) return [];
 
+  // Pre-filter input lineStrings. Mapbox vector tiles occasionally emit
+  // segments with duplicate consecutive points or zero length; polygonize
+  // can derive degenerate (< 4 position) faces from those and throw
+  // "Each LinearRing of a Polygon must have 4 or more Positions" inside
+  // polygon() before we ever see the output. Sanitize first.
   const lines = roads
-    .filter((r) => r.geometry.coordinates.length >= 2)
-    .map((r) => lineString(r.geometry.coordinates));
+    .map((r) => dedupConsecutive(r.geometry.coordinates))
+    .filter((coords) => coords.length >= 2)
+    .map((coords) => lineString(coords));
+
+  if (lines.length < 2) return [];
 
   const fc = featureCollection(lines);
-  const polygons = polygonize(fc);
+
+  // polygonize itself can throw on tricky inputs (self-touching geometry
+  // around bridges/intersections). Treat that as "no blocks" rather than
+  // failing the whole heat-map request with a 502.
+  let polygons: ReturnType<typeof polygonize>;
+  try {
+    polygons = polygonize(fc);
+  } catch (e) {
+    console.error('heat-map polygonize threw, returning no blocks:', e);
+    return [];
+  }
 
   const radiusKm = radiusM / 1000;
   const anchorPt = { type: 'Point' as const, coordinates: [anchor.lng, anchor.lat] };
@@ -127,4 +145,21 @@ function canonicalEdge(a: [number, number], b: [number, number]): string {
   const aKey = `${round(a[0])},${round(a[1])}`;
   const bKey = `${round(b[0])},${round(b[1])}`;
   return aKey < bKey ? `${aKey}|${bKey}` : `${bKey}|${aKey}`;
+}
+
+/**
+ * Remove duplicate consecutive points from a linestring. Mapbox vector
+ * tiles sometimes emit them at z=14 due to tile-boundary quantization.
+ */
+function dedupConsecutive(coords: [number, number][]): [number, number][] {
+  if (coords.length === 0) return [];
+  const out: [number, number][] = [coords[0]];
+  for (let i = 1; i < coords.length; i++) {
+    const prev = out[out.length - 1];
+    const cur = coords[i];
+    if (prev[0] !== cur[0] || prev[1] !== cur[1]) {
+      out.push(cur);
+    }
+  }
+  return out;
 }
