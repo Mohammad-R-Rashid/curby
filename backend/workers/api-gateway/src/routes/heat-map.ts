@@ -66,17 +66,44 @@ export async function handleParkingHeatMap(request: Request, env: Env): Promise<
       cfg,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'heat-map compute failed';
-    const stack = err instanceof Error ? err.stack : undefined;
-    // Surface the stack in the response body too while we're hunting
-    // a polygonize edge case — `wrangler tail` is great but slow to
-    // reach for, and the body is easier to share back over chat. Pull
-    // this back once the bug is squashed.
-    console.error('heat-map compute error:', message, '\n', stack);
-    return new Response(JSON.stringify({ error: message, stack }), {
-      status: 502,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    // Aggressive diagnostic capture — the Workers runtime drops stack
+    // on some thrown values, so collect every shred of context we can
+    // get and put it in the response body. Pull this back once the bug
+    // is squashed.
+    const message = err instanceof Error
+      ? err.message
+      : typeof err === 'string'
+        ? err
+        : 'heat-map compute failed';
+    const stack = err instanceof Error ? (err.stack ?? null) : null;
+    const errorType = err instanceof Error
+      ? (err.constructor?.name ?? 'Error')
+      : typeof err;
+    const ownProps: Record<string, unknown> = {};
+    if (err && typeof err === 'object') {
+      for (const k of Object.getOwnPropertyNames(err)) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          ownProps[k] = (err as any)[k];
+        } catch {
+          // skip
+        }
+      }
+    }
+    console.error('heat-map compute error:', message, '\n', stack, '\n', ownProps);
+    return new Response(
+      JSON.stringify({
+        error: message,
+        errorType,
+        stack,
+        props: ownProps,
+        rawString: String(err),
+      }),
+      {
+        status: 502,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
   }
 
   // 3. Write through to KV with the configured TTL. Don't block on this.
