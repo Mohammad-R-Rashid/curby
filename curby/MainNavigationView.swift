@@ -986,7 +986,10 @@ struct MainNavigationView: View {
                     selectedParkingArea = nil
                     parkSaveResetTask?.cancel()
                     parkSaveState = .idle
-                    cameraController.recenter()
+                    // Stay where the user was looking. Snapping back to
+                    // their puck after every X tap fought with the way
+                    // people explore — they want the area they were just
+                    // searching to stay visible.
                     sheetDetent = .fraction(0.30)
                 },
                 onExpandWalkingRadius: {

@@ -107,7 +107,14 @@ final class ParkingHeatMapManager {
                 isLoading = false
                 return
             }
-            tiles = response.tiles
+            // Skip reassignment when the new response is structurally
+            // equivalent to the one we already have. @Observable would
+            // otherwise fire on every poll and trigger a full body
+            // re-evaluation + Mapbox source re-upload — pure churn when
+            // the data hasn't actually changed.
+            if !tilesAreEquivalent(tiles, response.tiles) {
+                tiles = response.tiles
+            }
             fallback = response.fallback
             lastErrorMessage = nil
             lastUpdatedAt = Date()
@@ -124,5 +131,22 @@ final class ParkingHeatMapManager {
         _ b: CLLocationCoordinate2D
     ) -> Bool {
         abs(a.latitude - b.latitude) < 1e-6 && abs(a.longitude - b.longitude) < 1e-6
+    }
+
+    /// Conservative structural equivalence — compares the bits the UI
+    /// actually renders against (id, label, score). Skips full coordinate
+    /// equality because polygonize is deterministic for a given anchor,
+    /// so id-stability is enough to know geometry is unchanged.
+    private func tilesAreEquivalent(
+        _ a: [CurbyHeatMapTile],
+        _ b: [CurbyHeatMapTile]
+    ) -> Bool {
+        guard a.count == b.count else { return false }
+        for (lhs, rhs) in zip(a, b) {
+            if lhs.id != rhs.id { return false }
+            if lhs.label != rhs.label { return false }
+            if abs(lhs.score - rhs.score) > 0.005 { return false }
+        }
+        return true
     }
 }

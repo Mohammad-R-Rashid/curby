@@ -41,7 +41,13 @@ struct ParkingHeatMapMapStyleContent: MapStyleContent {
 
             FillLayer(id: fillLayerID, source: sourceID)
                 .minZoom(Self.minimumZoom)
-                .slot(.bottom)
+                // Mapbox Standard v3 applies lighting to custom layers
+                // in the lower slots — that was the reason the heat map
+                // was rendering invisibly. `.middle` keeps us above the
+                // road network so the user actually sees the fill, and
+                // `fillEmissiveStrength(1.0)` opts the layer out of the
+                // light-preset shader so our colors don't get darkened.
+                .slot(.middle)
                 .fillColor(
                     Exp(.match) {
                         Exp(.get) { "label" }
@@ -54,26 +60,28 @@ struct ParkingHeatMapMapStyleContent: MapStyleContent {
                         UIColor.gray
                     }
                 )
+                .fillEmissiveStrength(1.0)
                 // Translucent enough that the streets / labels remain
-                // readable through the colored fill.
+                // readable through the colored fill, but with a real
+                // floor so the heat map is unambiguously visible.
                 .fillOpacity(
                     Exp(.interpolate) {
                         Exp(.linear)
                         Exp(.zoom)
-                        11.0
+                        10.5
                         0.0
-                        12.0
-                        0.30
+                        11.5
+                        0.45
                         16.0
-                        0.38
+                        0.45
                         19.0
-                        0.32
+                        0.38
                     }
                 )
 
             LineLayer(id: lineLayerID, source: sourceID)
                 .minZoom(Self.minimumZoom)
-                .slot(.bottom)
+                .slot(.middle)
                 .lineColor(
                     Exp(.match) {
                         Exp(.get) { "label" }
@@ -86,19 +94,20 @@ struct ParkingHeatMapMapStyleContent: MapStyleContent {
                         UIColor.gray
                     }
                 )
+                .lineEmissiveStrength(1.0)
                 .lineWidth(
                     Exp(.interpolate) {
                         Exp(.linear)
                         Exp(.zoom)
                         11.0
-                        1.0
+                        1.5
                         14.0
-                        2.0
+                        2.5
                         18.0
-                        3.0
+                        4.0
                     }
                 )
-                .lineOpacity(0.85)
+                .lineOpacity(0.9)
                 .lineCap(.round)
                 .lineJoin(.round)
         }
