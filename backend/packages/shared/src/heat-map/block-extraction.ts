@@ -26,10 +26,11 @@ export function extractBlocks(
   anchor: LatLng,
   radiusM: number,
 ): Block[] {
-  const stats = {
+  const stats: ExtractStats = {
     inputRoads: roads.length,
     usableLines: 0,
-    polygonizeError: undefined as string | undefined,
+    polygonizeError: undefined,
+    badLines: 0,
     rawPolygons: 0,
     notPolygonType: 0,
     droppedDegenerateRing: 0,
@@ -73,16 +74,27 @@ export function extractBlocks(
   }
 
   // polygonize is brittle on real-world urban road networks — a single
-  // pathological linestring (e.g. a self-touching ramp the highway-class
-  // filter missed) takes down the whole call with the LinearRing throw.
-  // Binary-search the input: if the full set throws, bisect and try each
-  // half. Recurse until each surviving subset polygonizes cleanly. Bad
-  // linestrings get isolated as 1-element subsets and dropped silently.
-  // Worst-case time is O(n log n) polygonize calls; typical is closer
-  // to O(log n) because most of the input is well-formed.
+  // pathological linestring takes down the whole call with the
+  // LinearRing throw. Bisect just to *identify* which lines are bad,
+  // then polygonize the full set minus them in one call. That preserves
+  // all the inter-line topology so blocks that span what would have
+  // been a bisection boundary still form correctly.
   type PolygonFeat = ReturnType<typeof polygonize>['features'][number];
   const polygonFeatures: PolygonFeat[] = [];
-  robustPolygonize(lines, polygonFeatures, stats);
+
+  const indices = lines.map((_, i) => i);
+  const badIdx = new Set<number>();
+
+  // First pass: try the whole set. If it works, skip the bisection.
+  if (!attemptPolygonize(lines, polygonFeatures, stats)) {
+    findBadLineIndices(lines, indices, badIdx, stats);
+    stats.badLines = badIdx.size;
+    const cleanLines = lines.filter((_, i) => !badIdx.has(i));
+    // One last attempt with the bad lines removed. If THIS still throws
+    // we accept whatever's accumulated (empty in this branch).
+    polygonFeatures.length = 0;
+    attemptPolygonize(cleanLines, polygonFeatures, stats);
+  }
 
   stats.rawPolygons = polygonFeatures.length;
 
@@ -146,36 +158,58 @@ export function extractBlocks(
 }
 
 /**
- * Bisect-on-throw polygonize. Try the whole input; if turf throws, split
- * in half and recurse. Single-element subsets that throw are silently
- * dropped — those are the actual pathological linestrings. Output
- * polygons from each surviving subset are concatenated into `out`.
- *
- * The only quality cost is blocks that span a bisection boundary (the
- * split puts their constituent road segments into different subsets).
- * Empirically this costs a few blocks near the bad linestring; the rest
- * of the road graph polygonizes cleanly.
+ * Try polygonize on a set of lines; on success, push features into
+ * `out` and return true. On throw, leave `out` untouched and return
+ * false (caller decides what to do next).
  */
-function robustPolygonize(
+function attemptPolygonize(
   lines: ReturnType<typeof lineString>[],
   out: Array<ReturnType<typeof polygonize>['features'][number]>,
   stats: ExtractStats,
-): void {
-  if (lines.length < 2) return;
+): boolean {
+  if (lines.length < 2) {
+    return true;
+  }
   try {
     const fc = polygonize(featureCollection(lines));
     for (const f of fc.features) {
       out.push(f);
     }
+    return true;
   } catch (e) {
     if (!stats.polygonizeError) {
       stats.polygonizeError = e instanceof Error ? e.message : String(e);
     }
-    if (lines.length === 1) return;
-    const mid = Math.floor(lines.length / 2);
-    robustPolygonize(lines.slice(0, mid), out, stats);
-    robustPolygonize(lines.slice(mid), out, stats);
+    return false;
   }
+}
+
+/**
+ * Bisect to find every linestring index that, in isolation, causes
+ * polygonize to throw. Used to filter just the pathological inputs and
+ * then run a single clean polygonize over the full remainder — which
+ * preserves all the inter-line topology that a "polygonize each
+ * subset" approach would otherwise destroy at bisection boundaries.
+ */
+function findBadLineIndices(
+  lines: ReturnType<typeof lineString>[],
+  indices: number[],
+  badIdx: Set<number>,
+  stats: ExtractStats,
+): void {
+  if (lines.length === 0) return;
+  // Probe-only: don't accumulate output; we'll do the real polygonize
+  // once at the end on the full clean set.
+  const sink: Array<ReturnType<typeof polygonize>['features'][number]> = [];
+  if (attemptPolygonize(lines, sink, stats)) return;
+
+  if (lines.length === 1) {
+    badIdx.add(indices[0]);
+    return;
+  }
+  const mid = Math.floor(lines.length / 2);
+  findBadLineIndices(lines.slice(0, mid), indices.slice(0, mid), badIdx, stats);
+  findBadLineIndices(lines.slice(mid), indices.slice(mid), badIdx, stats);
 }
 
 /** Pure diagnostic; emits a single line we can scan via `wrangler tail`. */
@@ -194,6 +228,8 @@ export interface ExtractStats {
   inputRoads: number;
   usableLines: number;
   polygonizeError?: string;
+  /** Number of lineStrings the bisect scan flagged as pathological. */
+  badLines: number;
   rawPolygons: number;
   notPolygonType: number;
   droppedDegenerateRing: number;

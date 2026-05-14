@@ -75,6 +75,7 @@ export interface HeatMapResponse {
       inputRoads: number;
       usableLines: number;
       polygonizeError?: string;
+      badLines: number;
       rawPolygons: number;
       notPolygonType: number;
       droppedDegenerateRing: number;
