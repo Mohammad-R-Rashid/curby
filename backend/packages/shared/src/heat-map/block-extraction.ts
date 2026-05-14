@@ -61,23 +61,24 @@ export function extractBlocks(
     return [];
   }
 
-  const fc = featureCollection(lines);
-
   // polygonize itself can throw on tricky inputs (self-touching geometry
-  // around bridges/intersections). Treat that as "no blocks" rather than
-  // failing the whole heat-map request with a 502.
-  let polygons: ReturnType<typeof polygonize>;
-  try {
-    polygons = polygonize(fc);
-  } catch (e) {
-    stats.polygonizeError = e instanceof Error ? e.message : String(e);
-    console.error('heat-map polygonize threw, returning no blocks:', e);
-    logStats(stats, anchor, radiusM);
-    lastStats = stats;
-    return [];
+  // around bridges/intersections). Try the full set first; if that fails,
+  // chunk and polygonize each subset separately so a single bad cluster
+  // of segments can't take down the whole heat map.
+  type PolygonFeat = ReturnType<typeof polygonize>['features'][number];
+  const polygonFeatures: PolygonFeat[] = [];
+  if (!tryPolygonize(lines, polygonFeatures, stats)) {
+    // Whole-set polygonize threw — degrade to chunked extraction. Output
+    // quality suffers (we lose blocks that span chunk boundaries) but
+    // the user still gets a useful heat map instead of nothing.
+    const chunkSize = Math.max(50, Math.ceil(lines.length / 16));
+    for (let i = 0; i < lines.length; i += chunkSize) {
+      const slice = lines.slice(i, i + chunkSize);
+      tryPolygonize(slice, polygonFeatures, stats);
+    }
   }
 
-  stats.rawPolygons = polygons.features.length;
+  stats.rawPolygons = polygonFeatures.length;
 
   const radiusKm = radiusM / 1000;
   const anchorPt = { type: 'Point' as const, coordinates: [anchor.lng, anchor.lat] };
@@ -85,7 +86,7 @@ export function extractBlocks(
   const out: Block[] = [];
   let id = 0;
 
-  for (const feat of polygons.features) {
+  for (const feat of polygonFeatures) {
     if (feat.geometry.type !== 'Polygon') {
       stats.notPolygonType++;
       continue;
@@ -136,6 +137,32 @@ export function extractBlocks(
   logStats(stats, anchor, radiusM);
   lastStats = stats;
   return out;
+}
+
+/**
+ * Run turf.polygonize against a slice of lineStrings; push its output
+ * polygons into `out` and return `true` on success. On throw, record the
+ * first error message in `stats` (we only need one for diagnostics) and
+ * return `false` so the caller can fall back to chunking.
+ */
+function tryPolygonize(
+  lines: ReturnType<typeof lineString>[],
+  out: Array<ReturnType<typeof polygonize>['features'][number]>,
+  stats: ExtractStats,
+): boolean {
+  if (lines.length < 2) return true;
+  try {
+    const fc = polygonize(featureCollection(lines));
+    for (const f of fc.features) {
+      out.push(f);
+    }
+    return true;
+  } catch (e) {
+    if (!stats.polygonizeError) {
+      stats.polygonizeError = e instanceof Error ? e.message : String(e);
+    }
+    return false;
+  }
 }
 
 /** Pure diagnostic; emits a single line we can scan via `wrangler tail`. */

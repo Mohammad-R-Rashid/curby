@@ -93,7 +93,44 @@ export async function fetchRoadAndTrafficSegments(
     }
   }
 
-  return { roads, traffic };
+  // Mapbox vector tiles include a buffer zone around each tile (~64px)
+  // where features from neighboring tiles bleed in. That's intentional
+  // for seamless map rendering but means a road near a tile boundary
+  // appears in 2–4 tiles' worth of decoded output. The duplicates blow
+  // up polygonize's planar graph (1600+ "roads" for a 1km radius is way
+  // too many), so dedupe by canonical endpoint pair before returning.
+  return {
+    roads: dedupeLinestringsByEndpoints(roads, (r) => r.geometry.coordinates),
+    traffic: dedupeLinestringsByEndpoints(traffic, (t) => t.geometry.coordinates),
+  };
+}
+
+/**
+ * Group lineStrings by the canonical pair of their first / last
+ * positions (rounded to 6 decimals — ~0.1m). Two lineStrings with the
+ * same endpoint pair are almost certainly the same road segment from
+ * overlapping tile buffers.
+ */
+function dedupeLinestringsByEndpoints<T>(
+  items: T[],
+  coordsOf: (item: T) => [number, number][],
+): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const item of items) {
+    const coords = coordsOf(item);
+    if (coords.length < 2) continue;
+    const a = coords[0];
+    const b = coords[coords.length - 1];
+    const round = (n: number) => Math.round(n * 1e6) / 1e6;
+    const aKey = `${round(a[0])},${round(a[1])}`;
+    const bKey = `${round(b[0])},${round(b[1])}`;
+    const key = aKey < bKey ? `${aKey}|${bKey}|${coords.length}` : `${bKey}|${aKey}|${coords.length}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
 }
 
 // ─── Tile coverage math ─────────────────────────────────────
