@@ -229,14 +229,14 @@ function decodeRoads(buf: Uint8Array, tile: TileCoord): RoadSegment[] {
       out.push({
         geometry: {
           type: 'LineString',
-          coordinates: geo.geometry.coordinates as [number, number][],
+          coordinates: snapCoords(geo.geometry.coordinates as [number, number][]),
         },
         klass,
       });
     } else if (geo.geometry.type === 'MultiLineString') {
       for (const line of geo.geometry.coordinates as [number, number][][]) {
         out.push({
-          geometry: { type: 'LineString', coordinates: line },
+          geometry: { type: 'LineString', coordinates: snapCoords(line) },
           klass,
         });
       }
@@ -270,14 +270,14 @@ function decodeTraffic(buf: Uint8Array, tile: TileCoord): TrafficSegment[] {
       out.push({
         geometry: {
           type: 'LineString',
-          coordinates: geo.geometry.coordinates as [number, number][],
+          coordinates: snapCoords(geo.geometry.coordinates as [number, number][]),
         },
         congestion,
       });
     } else if (geo.geometry.type === 'MultiLineString') {
       for (const line of geo.geometry.coordinates as [number, number][][]) {
         out.push({
-          geometry: { type: 'LineString', coordinates: line },
+          geometry: { type: 'LineString', coordinates: snapCoords(line) },
           congestion,
         });
       }
@@ -288,6 +288,25 @@ function decodeTraffic(buf: Uint8Array, tile: TileCoord): TrafficSegment[] {
 
 function isCongestion(v: unknown): v is TrafficSegment['congestion'] {
   return v === 'low' || v === 'moderate' || v === 'heavy' || v === 'severe' || v === 'unknown';
+}
+
+/**
+ * Snap lng/lat values to a 6-decimal grid (~11 cm precision). Mapbox
+ * vector-tile decoding produces sub-bit floating-point jitter at tile
+ * boundaries that defeats turf.polygonize's planar-graph vertex sharing
+ * — two physically identical points decode to values differing by
+ * 1e-15, so polygonize sees them as distinct vertices and emits
+ * degenerate near-zero faces (the source of the "LinearRing must have
+ * 4 or more Positions" throw). Snapping forces those almost-identical
+ * points to coalesce so the graph is actually planar.
+ */
+function snapCoords(coords: [number, number][]): [number, number][] {
+  const out: [number, number][] = new Array(coords.length);
+  for (let i = 0; i < coords.length; i++) {
+    const c = coords[i];
+    out[i] = [Math.round(c[0] * 1e6) / 1e6, Math.round(c[1] * 1e6) / 1e6];
+  }
+  return out;
 }
 
 // Helper exposed for tests / scoring.
