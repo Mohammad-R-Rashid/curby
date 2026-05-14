@@ -38,14 +38,18 @@ export async function computeHeatMap(inputs: HeatMapInputs): Promise<HeatMapResp
   const { roads, traffic } = await fetchRoadAndTrafficSegments(anchor, radiusM, mapboxToken);
 
   // 2. Polygonize the road graph → block polygons (within radius).
-  const blocks = extractBlocks(roads, anchor, radiusM);
+  let blocks = extractBlocks(roads, anchor, radiusM);
   const extractStats = consumeLastExtractStats();
 
+  // If road-graph polygonization failed entirely (turf.polygonize is
+  // brittle on certain real-world tile topologies), fall back to a
+  // simple grid tiling of the query bbox. Tiles won't follow street
+  // geometry, but at least the user sees a heat map covering the area
+  // they're looking at.
+  let usedGridFallback = false;
   if (blocks.length === 0) {
-    return emptyResponse(anchor, radiusM, cfg.clusterCount, {
-      trafficSegments: traffic.length,
-      extract: extractStats,
-    });
+    blocks = gridFallbackBlocks(anchor, radiusM);
+    usedGridFallback = true;
   }
 
   // 3. Attach traffic signal to each block (perimeter-segment average).
@@ -77,8 +81,80 @@ export async function computeHeatMap(inputs: HeatMapInputs): Promise<HeatMapResp
     _debug: {
       trafficSegments: traffic.length,
       extract: extractStats,
+      usedGridFallback,
     },
   };
+}
+
+/**
+ * 4×4 grid of square cells covering the query bbox. Used as a last-
+ * resort fallback when polygonize returns no blocks for an anchor.
+ * Cells are constructed in WGS84 directly — good enough for the heat
+ * map visual (cells span ~200 m at 805 m radius, comparable to a real
+ * city block) without needing turf.
+ */
+function gridFallbackBlocks(anchor: LatLng, radiusM: number) {
+  const dLat = radiusM / 111_320;
+  const dLng = radiusM / (111_320 * Math.cos((anchor.lat * Math.PI) / 180));
+  const minLat = anchor.lat - dLat;
+  const maxLat = anchor.lat + dLat;
+  const minLng = anchor.lng - dLng;
+  const maxLng = anchor.lng + dLng;
+
+  const cellsPerSide = 4;
+  const latStep = (maxLat - minLat) / cellsPerSide;
+  const lngStep = (maxLng - minLng) / cellsPerSide;
+
+  const blocks: Array<{
+    id: number;
+    polygon: { type: 'Polygon'; coordinates: [number, number][][] };
+    centroid: LatLng;
+    areaSqM: number;
+    score: number;
+    scoreInputs: {
+      congestion: number;
+      activeParks: number;
+      recentDepartures: number;
+      parksPerHectare: number;
+    };
+    clusterId: number;
+  }> = [];
+
+  let id = 0;
+  for (let i = 0; i < cellsPerSide; i++) {
+    for (let j = 0; j < cellsPerSide; j++) {
+      const cellMinLng = minLng + j * lngStep;
+      const cellMaxLng = minLng + (j + 1) * lngStep;
+      const cellMinLat = minLat + i * latStep;
+      const cellMaxLat = minLat + (i + 1) * latStep;
+      const cLng = cellMinLng + lngStep / 2;
+      const cLat = cellMinLat + latStep / 2;
+      blocks.push({
+        id: id++,
+        polygon: {
+          type: 'Polygon',
+          coordinates: [[
+            [cellMinLng, cellMinLat],
+            [cellMaxLng, cellMinLat],
+            [cellMaxLng, cellMaxLat],
+            [cellMinLng, cellMaxLat],
+            [cellMinLng, cellMinLat],
+          ]],
+        },
+        centroid: { lat: cLat, lng: cLng },
+        areaSqM: lngStep * Math.cos((cLat * Math.PI) / 180) * 111_320 * latStep * 111_320,
+        score: 0,
+        scoreInputs: {
+          congestion: 0,
+          activeParks: 0,
+          recentDepartures: 0,
+          parksPerHectare: 0,
+        },
+        clusterId: -1,
+      });
+    }
+  }
+  return blocks;
 }
 
 function emptyResponse(

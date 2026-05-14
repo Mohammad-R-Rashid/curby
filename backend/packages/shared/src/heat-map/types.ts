@@ -82,6 +82,8 @@ export interface HeatMapResponse {
       droppedOutsideRadius: number;
       keptBlocks: number;
     } | null;
+    /** True when blocks came from the grid fallback, not road polygonize. */
+    usedGridFallback?: boolean;
   };
 }
 

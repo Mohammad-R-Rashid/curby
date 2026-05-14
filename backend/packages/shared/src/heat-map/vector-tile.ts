@@ -129,7 +129,12 @@ function dedupeLinestringsByEndpoints<T>(
     const round = (n: number) => Math.round(n * 1e6) / 1e6;
     const aKey = `${round(a[0])},${round(a[1])}`;
     const bKey = `${round(b[0])},${round(b[1])}`;
-    const key = aKey < bKey ? `${aKey}|${bKey}|${coords.length}` : `${bKey}|${aKey}|${coords.length}`;
+    // Key by canonical endpoint pair only — *not* by point count. Two
+    // lineStrings going A→B with slightly different curves between
+    // them form a "lens" face that polygonize can't close, so we keep
+    // only one representative per edge. For block-extraction purposes
+    // the exact curve doesn't matter; only the endpoint topology does.
+    const key = aKey < bKey ? `${aKey}|${bKey}` : `${bKey}|${aKey}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(item);
