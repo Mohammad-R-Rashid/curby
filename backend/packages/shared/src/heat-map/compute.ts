@@ -10,7 +10,11 @@ import type { CurbyRemoteConfig } from '../config.js';
 import type { LatLng } from '../types.js';
 import type { HeatMapResponse } from './types.js';
 import { fetchRoadAndTrafficSegments } from './vector-tile.js';
-import { buildAdjacency, extractBlocks } from './block-extraction.js';
+import {
+  buildAdjacency,
+  consumeLastExtractStats,
+  extractBlocks,
+} from './block-extraction.js';
 import {
   attachParkingSignalsToBlocks,
   attachTrafficToBlocks,
@@ -35,9 +39,13 @@ export async function computeHeatMap(inputs: HeatMapInputs): Promise<HeatMapResp
 
   // 2. Polygonize the road graph → block polygons (within radius).
   const blocks = extractBlocks(roads, anchor, radiusM);
+  const extractStats = consumeLastExtractStats();
 
   if (blocks.length === 0) {
-    return emptyResponse(anchor, radiusM, cfg.clusterCount);
+    return emptyResponse(anchor, radiusM, cfg.clusterCount, {
+      trafficSegments: traffic.length,
+      extract: extractStats,
+    });
   }
 
   // 3. Attach traffic signal to each block (perimeter-segment average).
@@ -68,7 +76,12 @@ export async function computeHeatMap(inputs: HeatMapInputs): Promise<HeatMapResp
   };
 }
 
-function emptyResponse(anchor: LatLng, radiusM: number, clusterCount: number): HeatMapResponse {
+function emptyResponse(
+  anchor: LatLng,
+  radiusM: number,
+  clusterCount: number,
+  debug?: HeatMapResponse['_debug'],
+): HeatMapResponse {
   return {
     tiles: [],
     anchor,
@@ -76,5 +89,6 @@ function emptyResponse(anchor: LatLng, radiusM: number, clusterCount: number): H
     clusterCount,
     computedAt: new Date().toISOString(),
     fallback: true,
+    _debug: debug,
   };
 }

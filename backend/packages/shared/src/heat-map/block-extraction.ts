@@ -26,7 +26,22 @@ export function extractBlocks(
   anchor: LatLng,
   radiusM: number,
 ): Block[] {
-  if (roads.length < 3) return [];
+  const stats = {
+    inputRoads: roads.length,
+    usableLines: 0,
+    polygonizeError: undefined as string | undefined,
+    rawPolygons: 0,
+    notPolygonType: 0,
+    droppedDegenerateRing: 0,
+    droppedOutsideRadius: 0,
+    keptBlocks: 0,
+  };
+
+  if (roads.length < 3) {
+    logStats(stats, anchor, radiusM);
+    lastStats = stats;
+    return [];
+  }
 
   // Pre-filter input lineStrings. Mapbox vector tiles occasionally emit
   // segments with duplicate consecutive points or zero length; polygonize
@@ -38,7 +53,13 @@ export function extractBlocks(
     .filter((coords) => coords.length >= 2)
     .map((coords) => lineString(coords));
 
-  if (lines.length < 2) return [];
+  stats.usableLines = lines.length;
+
+  if (lines.length < 2) {
+    logStats(stats, anchor, radiusM);
+    lastStats = stats;
+    return [];
+  }
 
   const fc = featureCollection(lines);
 
@@ -49,9 +70,14 @@ export function extractBlocks(
   try {
     polygons = polygonize(fc);
   } catch (e) {
+    stats.polygonizeError = e instanceof Error ? e.message : String(e);
     console.error('heat-map polygonize threw, returning no blocks:', e);
+    logStats(stats, anchor, radiusM);
+    lastStats = stats;
     return [];
   }
+
+  stats.rawPolygons = polygons.features.length;
 
   const radiusKm = radiusM / 1000;
   const anchorPt = { type: 'Point' as const, coordinates: [anchor.lng, anchor.lat] };
@@ -60,22 +86,30 @@ export function extractBlocks(
   let id = 0;
 
   for (const feat of polygons.features) {
-    if (feat.geometry.type !== 'Polygon') continue;
+    if (feat.geometry.type !== 'Polygon') {
+      stats.notPolygonType++;
+      continue;
+    }
 
     const coords = feat.geometry.coordinates as [number, number][][];
     // Every ring (outer + any holes) must have at least 4 positions to
     // form a valid LinearRing. Earlier we only validated the outer ring,
     // which let polygons with degenerate hole rings reach turf and blow
     // up the whole request with a 502.
-    if (coords.length === 0) continue;
-    if (coords.some((ring) => !ring || ring.length < 4)) continue;
+    if (coords.length === 0 || coords.some((ring) => !ring || ring.length < 4)) {
+      stats.droppedDegenerateRing++;
+      continue;
+    }
 
     const cFeat = centroid(feat);
     const cLng = cFeat.geometry.coordinates[0];
     const cLat = cFeat.geometry.coordinates[1];
 
     const distKm = distance(anchorPt, cFeat.geometry, { units: 'kilometers' });
-    if (distKm > radiusKm) continue;
+    if (distKm > radiusKm) {
+      stats.droppedOutsideRadius++;
+      continue;
+    }
 
     const polygon: GeoJSONPolygon = {
       type: 'Polygon',
@@ -98,7 +132,49 @@ export function extractBlocks(
     });
   }
 
+  stats.keptBlocks = out.length;
+  logStats(stats, anchor, radiusM);
+  lastStats = stats;
   return out;
+}
+
+/** Pure diagnostic; emits a single line we can scan via `wrangler tail`. */
+function logStats(stats: ExtractStats, anchor: LatLng, radiusM: number): void {
+  console.log(
+    `[heat-map extract] anchor=${anchor.lat.toFixed(4)},${anchor.lng.toFixed(4)} r=${radiusM} ` +
+    `inputRoads=${stats.inputRoads} usableLines=${stats.usableLines} ` +
+    `rawPolygons=${stats.rawPolygons} droppedDegenerateRing=${stats.droppedDegenerateRing} ` +
+    `droppedOutsideRadius=${stats.droppedOutsideRadius} notPolygonType=${stats.notPolygonType} ` +
+    `keptBlocks=${stats.keptBlocks}` +
+    (stats.polygonizeError ? ` polygonizeError="${stats.polygonizeError}"` : '')
+  );
+}
+
+export interface ExtractStats {
+  inputRoads: number;
+  usableLines: number;
+  polygonizeError?: string;
+  rawPolygons: number;
+  notPolygonType: number;
+  droppedDegenerateRing: number;
+  droppedOutsideRadius: number;
+  keptBlocks: number;
+}
+
+/**
+ * Module-level latch — last computed stats from extractBlocks. Set as a
+ * side effect on each call so the orchestrator can attach the stats to
+ * the response without reshaping every signature. Worker isolates are
+ * shared across many requests, so reading this only makes sense
+ * immediately after extractBlocks() returns within the same async path.
+ */
+let lastStats: ExtractStats | null = null;
+
+/** Get the stats from the most recent extractBlocks invocation. */
+export function consumeLastExtractStats(): ExtractStats | null {
+  const s = lastStats;
+  lastStats = null;
+  return s;
 }
 
 // ─── Adjacency graph ────────────────────────────────────────

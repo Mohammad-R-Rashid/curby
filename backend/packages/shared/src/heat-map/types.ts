@@ -64,6 +64,24 @@ export interface HeatMapResponse {
    * to show a "low confidence / beta" badge.
    */
   fallback: boolean;
+  /**
+   * Optional diagnostics — populated when the pipeline produced no tiles
+   * so a `curl` consumer can see exactly where the data was lost. Will
+   * be removed once we're confident in the block-extraction quality.
+   */
+  _debug?: {
+    trafficSegments: number;
+    extract: {
+      inputRoads: number;
+      usableLines: number;
+      polygonizeError?: string;
+      rawPolygons: number;
+      notPolygonType: number;
+      droppedDegenerateRing: number;
+      droppedOutsideRadius: number;
+      keptBlocks: number;
+    } | null;
+  };
 }
 
 // ─── Internal block / scoring shapes ────────────────────────
