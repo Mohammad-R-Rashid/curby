@@ -72,22 +72,17 @@ export function extractBlocks(
     return [];
   }
 
-  // polygonize itself can throw on tricky inputs (self-touching geometry
-  // around bridges/intersections). Try the full set first; if that fails,
-  // chunk and polygonize each subset separately so a single bad cluster
-  // of segments can't take down the whole heat map.
+  // polygonize is brittle on real-world urban road networks — a single
+  // pathological linestring (e.g. a self-touching ramp the highway-class
+  // filter missed) takes down the whole call with the LinearRing throw.
+  // Binary-search the input: if the full set throws, bisect and try each
+  // half. Recurse until each surviving subset polygonizes cleanly. Bad
+  // linestrings get isolated as 1-element subsets and dropped silently.
+  // Worst-case time is O(n log n) polygonize calls; typical is closer
+  // to O(log n) because most of the input is well-formed.
   type PolygonFeat = ReturnType<typeof polygonize>['features'][number];
   const polygonFeatures: PolygonFeat[] = [];
-  if (!tryPolygonize(lines, polygonFeatures, stats)) {
-    // Whole-set polygonize threw — degrade to chunked extraction. Output
-    // quality suffers (we lose blocks that span chunk boundaries) but
-    // the user still gets a useful heat map instead of nothing.
-    const chunkSize = Math.max(50, Math.ceil(lines.length / 16));
-    for (let i = 0; i < lines.length; i += chunkSize) {
-      const slice = lines.slice(i, i + chunkSize);
-      tryPolygonize(slice, polygonFeatures, stats);
-    }
-  }
+  robustPolygonize(lines, polygonFeatures, stats);
 
   stats.rawPolygons = polygonFeatures.length;
 
@@ -151,28 +146,35 @@ export function extractBlocks(
 }
 
 /**
- * Run turf.polygonize against a slice of lineStrings; push its output
- * polygons into `out` and return `true` on success. On throw, record the
- * first error message in `stats` (we only need one for diagnostics) and
- * return `false` so the caller can fall back to chunking.
+ * Bisect-on-throw polygonize. Try the whole input; if turf throws, split
+ * in half and recurse. Single-element subsets that throw are silently
+ * dropped — those are the actual pathological linestrings. Output
+ * polygons from each surviving subset are concatenated into `out`.
+ *
+ * The only quality cost is blocks that span a bisection boundary (the
+ * split puts their constituent road segments into different subsets).
+ * Empirically this costs a few blocks near the bad linestring; the rest
+ * of the road graph polygonizes cleanly.
  */
-function tryPolygonize(
+function robustPolygonize(
   lines: ReturnType<typeof lineString>[],
   out: Array<ReturnType<typeof polygonize>['features'][number]>,
   stats: ExtractStats,
-): boolean {
-  if (lines.length < 2) return true;
+): void {
+  if (lines.length < 2) return;
   try {
     const fc = polygonize(featureCollection(lines));
     for (const f of fc.features) {
       out.push(f);
     }
-    return true;
   } catch (e) {
     if (!stats.polygonizeError) {
       stats.polygonizeError = e instanceof Error ? e.message : String(e);
     }
-    return false;
+    if (lines.length === 1) return;
+    const mid = Math.floor(lines.length / 2);
+    robustPolygonize(lines.slice(0, mid), out, stats);
+    robustPolygonize(lines.slice(mid), out, stats);
   }
 }
 
