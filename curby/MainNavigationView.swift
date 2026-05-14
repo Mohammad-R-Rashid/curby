@@ -395,7 +395,7 @@ struct MainNavigationView: View {
 
                 // Popular places pins — visible when browsing (no destination selected)
                 if searchState.selectedDestination == nil, currentMapZoom >= 10.0 {
-                    ForEvery(placesService.places) { place in
+                    ForEvery(visiblePlaces) { place in
                         MapViewAnnotation(coordinate: place.coordinate) {
                             PlaceMapPin(
                                 place: place,
@@ -661,10 +661,39 @@ struct MainNavigationView: View {
         cameraController.navigateToDestination(recommendation.area.coordinate, zoom: 16.0)
     }
 
+    /// Parking pins to render. Filters out the area that's already
+    /// drawn as the active recommendation, then progressively reveals
+    /// more pins as the user zooms in — at neighborhood zoom we'd
+    /// otherwise dump every garage and street segment on the map and
+    /// the result became unreadable, especially in dense downtowns.
     private var visibleParkingAreas: [LiveParkingArea] {
-        parkingAreaManager.areas.filter { area in
+        let filtered = parkingAreaManager.areas.filter { area in
             parkingWebSocketManager.activeRecommendation?.area.id != area.id
         }
+        let cap: Int
+        switch currentMapZoom {
+        case ..<12.0:   cap = 4
+        case ..<13.5:   cap = 8
+        case ..<15.0:   cap = 14
+        default:        cap = filtered.count
+        }
+        // `parkingAreaManager.areas` is already sorted destination-first,
+        // so `prefix(cap)` keeps the most relevant ones.
+        return Array(filtered.prefix(cap))
+    }
+
+    /// Hotspot pins to render. Same progressive-disclosure idea as
+    /// `visibleParkingAreas` — at city zoom only the most prominent
+    /// few; at neighborhood zoom the full set the carousel uses.
+    private var visiblePlaces: [PopularLocation] {
+        let all = placesService.places
+        let cap: Int
+        switch currentMapZoom {
+        case ..<11.0:   cap = 3
+        case ..<12.5:   cap = 6
+        default:        cap = all.count
+        }
+        return Array(all.prefix(cap))
     }
 
     private func handleDestinationSelected(_ dest: SelectedDestination) {

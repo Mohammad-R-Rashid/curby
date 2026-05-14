@@ -120,7 +120,13 @@ final class ParkingAreaManager {
         // remaining coincident entries.
         let pageLimit = String(min(max(limit, 1), 25))
         let proximity = "\(coordinate.longitude),\(coordinate.latitude)"
-        let bboxPaddingMeters = walkingRadiusMeters + CurbyConstants.parkingGeofenceToleranceMeters
+        // Query a bbox 1.75× the walking radius so dense neighborhoods
+        // don't blow Mapbox's 25-result cap before we see all the
+        // garages near a small hotspot. The post-filter below still
+        // prunes everything outside the actual walking-radius circle
+        // by `estimatedWalkingMeters`, so coverage goes up without
+        // showing pins beyond the geofence.
+        let bboxPaddingMeters = walkingRadiusMeters * 1.75 + CurbyConstants.parkingGeofenceToleranceMeters
         let metersPerLatDegree = 111_000.0
         let metersPerLonDegree = 111_000.0 * max(cos(coordinate.latitude * .pi / 180), 0.1)
         let dLat = bboxPaddingMeters / metersPerLatDegree
