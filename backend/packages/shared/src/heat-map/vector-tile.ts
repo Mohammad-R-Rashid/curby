@@ -331,10 +331,12 @@ export function congestionLevelToNumber(level: TrafficSegment['congestion']): nu
       return 1.0;
     case 'unknown':
     default:
-      // No data → treat the same as free-flow. Mapbox traffic-v1 only
-      // covers major streets; calling unknown "free-flow" keeps the
-      // uncovered residential grid out of the orange/red bucket.
-      return 0.0;
+      // "We don't know" — neutral medium. Distinct from the traffic
+      // OVERLAY (which deliberately hides unknown segments to keep
+      // noise off the map): the heat-map SCORE needs unknown to push
+      // a tile to medium so we don't falsely paint every uncovered
+      // residential block as Easy / green.
+      return 0.4;
   }
 }
 

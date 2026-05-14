@@ -73,9 +73,12 @@ export function attachTrafficToBlocks(
   }
 
   for (let i = 0; i < blocks.length; i++) {
-    // No segments attached → treat the block as free-flowing (green),
-    // matching how individual `unknown` segments are handled.
-    blocks[i].scoreInputs.congestion = counts[i] > 0 ? sums[i] / counts[i] : 0.0;
+    // No traffic segments matched this block → neutral medium. Same
+    // motivation as the per-segment `unknown` case in
+    // congestionLevelToNumber: we should NOT paint no-data blocks as
+    // green, because that makes uncovered residential grids look
+    // misleadingly easy.
+    blocks[i].scoreInputs.congestion = counts[i] > 0 ? sums[i] / counts[i] : 0.4;
   }
 }
 
