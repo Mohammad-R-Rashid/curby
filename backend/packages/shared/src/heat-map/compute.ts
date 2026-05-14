@@ -73,6 +73,11 @@ export async function computeHeatMap(inputs: HeatMapInputs): Promise<HeatMapResp
     clusterCount: tiles.length,
     computedAt: new Date().toISOString(),
     fallback,
+    // Surfaced on every response while we're tuning block extraction.
+    _debug: {
+      trafficSegments: traffic.length,
+      extract: extractStats,
+    },
   };
 }
 

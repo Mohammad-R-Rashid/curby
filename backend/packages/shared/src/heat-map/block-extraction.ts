@@ -43,14 +43,17 @@ export function extractBlocks(
     return [];
   }
 
-  // Pre-filter input lineStrings. Mapbox vector tiles occasionally emit
-  // segments with duplicate consecutive points or zero length; polygonize
-  // can derive degenerate (< 4 position) faces from those and throw
-  // "Each LinearRing of a Polygon must have 4 or more Positions" inside
-  // polygon() before we ever see the output. Sanitize first.
+  // Clip the input to a bounding box just larger than the query radius.
+  // Each fetched z=14 tile covers ~6 km² but the radius circle is often
+  // < 2 km² — so 70-95% of decoded roads were beyond the area we care
+  // about, dominating polygonize's planar graph and giving it more
+  // opportunities to fail far from anything the user will ever see.
+  const padFactor = 1.15;
+  const bbox = bboxForRadius(anchor, radiusM * padFactor);
+
   const lines = roads
     .map((r) => dedupConsecutive(r.geometry.coordinates))
-    .filter((coords) => coords.length >= 2)
+    .filter((coords) => coords.length >= 2 && hasAnyPointInBbox(coords, bbox))
     .map((coords) => lineString(coords));
 
   stats.usableLines = lines.length;
@@ -248,6 +251,33 @@ function canonicalEdge(a: [number, number], b: [number, number]): string {
   const aKey = `${round(a[0])},${round(a[1])}`;
   const bKey = `${round(b[0])},${round(b[1])}`;
   return aKey < bKey ? `${aKey}|${bKey}` : `${bKey}|${aKey}`;
+}
+
+interface Bbox {
+  minLng: number;
+  minLat: number;
+  maxLng: number;
+  maxLat: number;
+}
+
+function bboxForRadius(anchor: LatLng, radiusM: number): Bbox {
+  const dLat = radiusM / 111_320;
+  const dLng = radiusM / (111_320 * Math.cos((anchor.lat * Math.PI) / 180));
+  return {
+    minLat: anchor.lat - dLat,
+    maxLat: anchor.lat + dLat,
+    minLng: anchor.lng - dLng,
+    maxLng: anchor.lng + dLng,
+  };
+}
+
+function hasAnyPointInBbox(coords: [number, number][], bbox: Bbox): boolean {
+  for (const [lng, lat] of coords) {
+    if (lng >= bbox.minLng && lng <= bbox.maxLng && lat >= bbox.minLat && lat <= bbox.maxLat) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
