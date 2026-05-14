@@ -53,7 +53,15 @@ export function extractBlocks(
 
   const lines = roads
     .map((r) => dedupConsecutive(r.geometry.coordinates))
-    .filter((coords) => coords.length >= 2 && hasAnyPointInBbox(coords, bbox))
+    .filter(
+      (coords) =>
+        coords.length >= 2 &&
+        hasAnyPointInBbox(coords, bbox) &&
+        // Drop tiny stubs (<10 m). They're typically tile-boundary
+        // remnants that contribute nothing topologically but each is
+        // another chance for polygonize to construct a degenerate face.
+        linestringLengthMeters(coords) >= 10,
+    )
     .map((coords) => lineString(coords));
 
   stats.usableLines = lines.length;
@@ -278,6 +286,25 @@ function hasAnyPointInBbox(coords: [number, number][], bbox: Bbox): boolean {
     }
   }
   return false;
+}
+
+/**
+ * Sum of straight-line distances between consecutive points in
+ * approximate meters. Equirectangular projection — good enough for
+ * city-scale comparisons against a minimum-length filter.
+ */
+function linestringLengthMeters(coords: [number, number][]): number {
+  if (coords.length < 2) return 0;
+  let total = 0;
+  for (let i = 1; i < coords.length; i++) {
+    const a = coords[i - 1];
+    const b = coords[i];
+    const meanLatRad = ((a[1] + b[1]) / 2) * (Math.PI / 180);
+    const dx = (b[0] - a[0]) * 111_320 * Math.cos(meanLatRad);
+    const dy = (b[1] - a[1]) * 111_320;
+    total += Math.sqrt(dx * dx + dy * dy);
+  }
+  return total;
 }
 
 /**

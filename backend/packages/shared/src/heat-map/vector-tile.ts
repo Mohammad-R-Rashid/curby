@@ -28,21 +28,25 @@ const STREETS_TILESET = 'mapbox.mapbox-streets-v8';
 const TRAFFIC_TILESET = 'mapbox.mapbox-traffic-v1';
 
 /**
- * OSM road classes that *can* form block boundaries. Excludes service
- * roads / footways / parking aisles — including them produces tons of
- * "blocks" inside parking lots which break clustering.
+ * OSM road classes that *can* form block boundaries. We deliberately
+ * exclude:
+ *
+ *   - service / footway / parking aisles → produce "blocks" inside
+ *     parking lots that wreck clustering.
+ *   - motorway / trunk and *all* `_link` ramp classes → these are
+ *     grade-separated highways whose tile geometry is full of self-
+ *     touching curves (overpasses, cloverleaf ramps) that crash
+ *     turf.polygonize internally with "LinearRing must have 4 or
+ *     more Positions" before any of our output guards can fire.
+ *
+ * What's left is the normal street network — primary arterials and
+ * below — which is precisely the surface where parking actually
+ * happens anyway.
  */
 const BLOCK_FORMING_ROAD_CLASSES = new Set([
-  'motorway',
-  'motorway_link',
-  'trunk',
-  'trunk_link',
   'primary',
-  'primary_link',
   'secondary',
-  'secondary_link',
   'tertiary',
-  'tertiary_link',
   'street',
   'street_limited',
   'residential',
