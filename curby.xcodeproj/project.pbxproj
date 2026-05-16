@@ -69,6 +69,13 @@
 			);
 			target = 3AAA8DA42FAB182400640B17 /* CurbyLiveActivityExtension */;
 		};
+		3AAA8DC32FAC314100640B17 /* Exceptions for "curby" folder in "CurbyLiveActivityExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				LiveActivity/CurbyLiveActivityAttributes.swift,
+			);
+			target = 3AAA8DA42FAB182400640B17 /* CurbyLiveActivityExtension */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -82,6 +89,9 @@
 		};
 		894495F52F93FA2200026B35 /* curby */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				3AAA8DC32FAC314100640B17 /* Exceptions for "curby" folder in "CurbyLiveActivityExtension" target */,
+			);
 			path = curby;
 			sourceTree = "<group>";
 		};
